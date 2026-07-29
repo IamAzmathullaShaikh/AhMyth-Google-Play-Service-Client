@@ -478,7 +478,7 @@ body::after{
 /* ─── STATS TAB ─── */
 .stats-grid{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
-  gap:8px;padding:10px 14px;
+  gap:8px;padding:10px 14px 4px;
 }
 .stat-card{
   background:var(--surface);border:1px solid var(--border);
@@ -492,6 +492,80 @@ body::after{
 .stat-card .stat-number.purple{color:var(--accent2)}
 .stat-card .stat-number.pink{color:var(--pink)}
 .stat-card .stat-label{font-size:9px;color:var(--text-muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.5px}
+
+/* ─── SPARKLINE CHART ─── */
+.sparkline-section{
+  padding:0 14px 10px;
+}
+.sparkline-card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:10px 14px;
+}
+.sparkline-card .sparkline-header{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:6px;
+}
+.sparkline-card .sparkline-header .title{
+  font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);
+}
+.sparkline-card .sparkline-header .legend{
+  display:flex;gap:10px;font-size:8px;color:var(--text-muted);
+}
+.sparkline-card .sparkline-header .legend span{display:flex;align-items:center;gap:4px}
+.sparkline-card .sparkline-header .legend .swatch{
+  width:8px;height:8px;border-radius:2px;display:inline-block;
+}
+.sparkline-card .sparkline-header .legend .swatch.connect{background:var(--cyber)}
+.sparkline-card .sparkline-header .legend .swatch.disconnect{background:var(--red)}
+.sparkline-card .sparkline-toolbar{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:6px;gap:8px;
+}
+.sparkline-card .sparkline-toolbar .time-range-group{
+  display:flex;gap:3px;
+}
+.sparkline-card .sparkline-toolbar .range-btn{
+  padding:2px 8px;border-radius:4px;
+  border:1px solid var(--border);background:var(--surface);
+  color:var(--text-muted);font-size:9px;cursor:pointer;
+  font-family:var(--font);transition:all .12s;
+}
+.sparkline-card .sparkline-toolbar .range-btn:hover{
+  border-color:var(--accent);color:var(--accent);
+}
+.sparkline-card .sparkline-toolbar .range-btn.active{
+  background:rgba(0,240,255,0.1);border-color:var(--accent);
+  color:var(--accent);
+}
+.sparkline-card .sparkline-toolbar .sparkline-hover-info{
+  font-size:9px;color:var(--text-muted);transition:color .2s;
+}
+.sparkline-card .sparkline-toolbar .sparkline-hover-info.active{
+  color:var(--accent);
+}
+.sparkline-card .sparkline-canvas-wrap{
+  position:relative;width:100%;
+}
+.sparkline-card .sparkline-canvas-wrap canvas{
+  width:100%;height:120px;border-radius:var(--radius-sm);
+  display:block;cursor:crosshair;
+}
+.sparkline-card .sparkline-tooltip{
+  position:absolute;pointer-events:none;z-index:10;
+  display:none;background:rgba(19,27,46,0.94);
+  border:1px solid var(--accent);border-radius:6px;
+  padding:6px 10px;font-size:9px;white-space:nowrap;
+  backdrop-filter:blur(8px);box-shadow:0 4px 20px rgba(0,0,0,0.5);
+  transform:translate(-50%,calc(-100% - 8px));
+}
+.sparkline-card .sparkline-tooltip.visible{display:block}
+.sparkline-card .sparkline-tooltip .tip-row{
+  display:flex;justify-content:space-between;gap:12px;padding:1px 0;
+}
+.sparkline-card .sparkline-tooltip .tip-label{color:var(--text-muted)}
+.sparkline-card .sparkline-tooltip .tip-value{color:var(--text);font-weight:600}
+.sparkline-card .sparkline-tooltip .tip-value.connect{color:var(--cyber)}
+.sparkline-card .sparkline-tooltip .tip-value.disconnect{color:var(--red)}
 
 /* ─── SAVED COMMANDS ─── */
 .saved-commands{padding:10px 14px}
@@ -870,6 +944,32 @@ body::after{
           <div class="stat-card"><div class="stat-number pink" id="statKlEvents">0</div><div class="stat-label">Keystrokes</div></div>
           <div class="stat-card"><div class="stat-number" id="statUptime">—</div><div class="stat-label">Session Duration</div></div>
         </div>
+        <!-- ─── CONNECTION TIMELINE SPARKLINE ─── -->
+        <div class="sparkline-section">
+          <div class="sparkline-card">
+            <div class="sparkline-header">
+              <span class="title">📈 Connection Timeline</span>
+              <div class="legend">
+                <span><span class="swatch connect"></span> Connect</span>
+                <span><span class="swatch disconnect"></span> Disconnect</span>
+                <span id="sparklineCount" style="color:var(--text-dim)">0 events</span>
+              </div>
+            </div>
+            <div class="sparkline-toolbar">
+              <div class="time-range-group" id="sparklineRangeGroup">
+                <button class="range-btn active" data-range="300000" onclick="sparklineSetRange(300000)">5m</button>
+                <button class="range-btn" data-range="900000" onclick="sparklineSetRange(900000)">15m</button>
+                <button class="range-btn" data-range="3600000" onclick="sparklineSetRange(3600000)">1h</button>
+                <button class="range-btn" data-range="-1" onclick="sparklineSetRange(-1)">All</button>
+              </div>
+              <span class="sparkline-hover-info" id="sparklineHoverInfo">Hover over chart</span>
+            </div>
+            <div class="sparkline-canvas-wrap">
+              <canvas id="sparklineCanvas"></canvas>
+              <div class="sparkline-tooltip" id="sparklineTooltip"></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- ─── LOG ─── -->
@@ -919,6 +1019,374 @@ let sessionStart = Date.now();
 let deviceSearchQuery = '';
 
 // ================================================================
+// CONNECTION TIMELINE (for sparkline chart)
+// ================================================================
+/** Array of { ts, type } where type is 'connect' | 'disconnect' | 'device_up' | 'device_down' */
+let connectionTimeline = [];
+let sparklineInitialized = false;
+let prevDeviceCount = 0;
+let sparklineTimeRange = 300000; // ms: default 5 minutes
+let sparklinePoints = []; // cached points for hover interaction
+let sparklineMinX = 0, sparklineMaxX = 0, sparklineMaxY = 5;
+let sparklineRangeX = 0;
+
+/** Set sparkline time range and redraw */
+function sparklineSetRange(ms) {
+  sparklineTimeRange = ms;
+  document.querySelectorAll('.range-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.range) === ms);
+  });
+  renderSparkline();
+}
+
+/** Record an event on the connection timeline, auto-pruning to 500 entries */
+function recordConnectionEvent(type, label) {
+  connectionTimeline.push({ ts: Date.now(), type, label: label || type });
+  if (connectionTimeline.length > 500) connectionTimeline = connectionTimeline.slice(-500);
+  document.getElementById('sparklineCount').textContent = connectionTimeline.length + ' events';
+  // Debounce: redraw within 500ms
+  if (!window._sparklinePending) {
+    window._sparklinePending = true;
+    setTimeout(() => { window._sparklinePending = false; renderSparkline(); }, 100);
+  }
+}
+
+/**
+ * Renders a canvas-based sparkline chart of connection events over time.
+ * X-axis: time (last 5 minutes by default)
+ * Y-axis: cumulative device count
+ * Green dashes = connect events, Red dashes = disconnect events
+ * Area fill = connection stability indicator
+ */
+function renderSparkline() {
+  const canvas = document.getElementById('sparklineCanvas');
+  if (!canvas || !canvas.getContext) return;
+  const dpr = window.devicePixelRatio || 1;
+  const displayW = canvas.clientWidth || 800;
+  const displayH = canvas.clientHeight || 240;
+  // Set internal resolution for HiDPI
+  canvas.width = Math.round(displayW * dpr);
+  canvas.height = Math.round(displayH * dpr);
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  // Work in CSS pixels from here on
+  const cssW = displayW, cssH = displayH;
+  const PAD = { top: 20, right: 20, bottom: 25, left: 40 };
+  const plotW = cssW - PAD.left - PAD.right;
+  const plotH = cssH - PAD.top - PAD.bottom;
+
+  // Clear
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  // Background
+  ctx.fillStyle = '#0a0e17';
+  ctx.fillRect(0, 0, cssW, cssH);
+
+  const events = connectionTimeline;
+  if (events.length < 2) {
+    ctx.fillStyle = '#3a5575';
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Waiting for connection data...', cssW / 2, cssH / 2);
+    sparklinePoints = [];
+    return;
+  }
+
+  // Time window: use sparklineTimeRange or expand to fit all data
+  const now = Date.now();
+  let tStart;
+  if (sparklineTimeRange === -1) {
+    // "All" — use earliest event
+    tStart = events[0].ts;
+  } else {
+    tStart = now - Math.max(sparklineTimeRange, events[events.length - 1].ts - events[0].ts + 60000);
+  }
+
+  // Filter events within window + compute cumulative device count
+  let cumulative = 0;
+  const points = [];
+  for (const e of events) {
+    if (e.ts < tStart) {
+      if (e.type === 'connect' || e.type === 'device_up') cumulative = Math.min(cumulative + 1, 20);
+      else if (e.type === 'disconnect' || e.type === 'device_down') cumulative = Math.max(cumulative - 1, 0);
+      continue;
+    }
+    if (e.type === 'connect' || e.type === 'device_up') cumulative = Math.min(cumulative + 1, 20);
+    else if (e.type === 'disconnect' || e.type === 'device_down') cumulative = Math.max(cumulative - 1, 0);
+    points.push({ x: e.ts, y: cumulative, type: e.type, label: e.label });
+  }
+
+  if (points.length < 2) {
+    ctx.fillStyle = '#3a5575';
+    ctx.font = '12px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Not enough data yet...', cssW / 2, cssH / 2);
+    sparklinePoints = [];
+    return;
+  }
+
+  // Cache for hover interaction
+  sparklinePoints = points;
+  sparklineMaxY = Math.max(5, ...points.map(p => p.y));
+  sparklineMinX = points[0].x;
+  sparklineMaxX = points[points.length - 1].x;
+  sparklineRangeX = Math.max(sparklineMaxX - sparklineMinX, 1000);
+
+  const maxY = sparklineMaxY, minX = sparklineMinX, maxX = sparklineMaxX, rangeX = sparklineRangeX;
+
+  function px(e) { return PAD.left + ((e.x - minX) / rangeX) * plotW; }
+  function py(v) { return PAD.top + plotH - (v / maxY) * plotH; }
+
+  // Draw grid lines
+  ctx.strokeStyle = '#1a2440';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + (plotH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(cssW - PAD.right, y); ctx.stroke();
+  }
+
+  // Draw Y-axis labels
+  ctx.fillStyle = '#3a5575';
+  ctx.font = '9px "JetBrains Mono", monospace';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= maxY && i <= 4; i++) {
+    const val = Math.round((maxY / 4) * i);
+    if (val > 0) {
+      ctx.fillText(String(val), PAD.left - 4, py(val) + 3);
+    }
+  }
+
+  // Draw X-axis time labels
+  ctx.textAlign = 'center';
+  const totalSec = (maxX - minX) / 1000;
+  const labelCount = Math.min(6, Math.max(2, Math.floor(totalSec / 10)));
+  for (let i = 0; i <= labelCount; i++) {
+    const t = minX + (rangeX / labelCount) * i;
+    const d = new Date(t);
+    const label = d.getMinutes().toString().padStart(2, '0') + ':' + d.getSeconds().toString().padStart(2, '0');
+    ctx.fillText(label, PAD.left + (plotW / labelCount) * i, cssH - PAD.bottom + 14);
+  }
+
+  // Draw area fill (gradient)
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + plotH);
+  grad.addColorStop(0, 'rgba(0,255,136,0.12)');
+  grad.addColorStop(1, 'rgba(0,255,136,0)');
+  ctx.beginPath();
+  ctx.moveTo(PAD.left, PAD.top + plotH);
+  for (const p of points) ctx.lineTo(px(p), py(p.y));
+  ctx.lineTo(PAD.left + plotW, PAD.top + plotH);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw the main line
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    i === 0 ? ctx.moveTo(px(p), py(p.y)) : ctx.lineTo(px(p), py(p.y));
+  }
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Draw event markers (larger for better hover targets)
+  for (const p of points) {
+    const cx = px(p), cy = py(p.y);
+    if (p.type === 'connect' || p.type === 'device_up') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#22c55e';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(34,197,94,0.3)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else if (p.type === 'disconnect' || p.type === 'device_down') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#ef4444';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(239,68,68,0.3)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Draw current value label
+  const last = points[points.length - 1];
+  ctx.fillStyle = '#00ff88';
+  ctx.font = 'bold 11px "JetBrains Mono", monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(last.y + ' devices', px(last) + 7, py(last.y) + 4);
+
+  if (!sparklineInitialized) {
+    sparklineInitialized = true;
+    // Wire up hover interaction once
+    sparklineInitHover(canvas);
+  }
+}
+
+// ================================================================
+// SPARKLINE HOVER CROSSHAIR + TOOLTIP
+// ================================================================
+let sparklineHoverActive = false;
+
+function sparklineInitHover(canvas) {
+  const wrap = canvas.closest('.sparkline-canvas-wrap');
+  const tooltip = document.getElementById('sparklineTooltip');
+  const infoEl = document.getElementById('sparklineHoverInfo');
+  const PAD = { top: 20, right: 20, bottom: 25, left: 40 };
+
+  function getNearestPoint(mouseX) {
+    const pts = sparklinePoints;
+    if (!pts || pts.length < 2) return null;
+    const rect = canvas.getBoundingClientRect();
+    const plotW = rect.width - PAD.left - PAD.right;
+    if (plotW <= 0) return null;
+    // Convert mouse x (relative to canvas) to time
+    const xFrac = (mouseX - PAD.left) / plotW;
+    const t = sparklineMinX + xFrac * sparklineRangeX;
+    // Find nearest point
+    let nearest = pts[0];
+    let minDist = Math.abs(pts[0].x - t);
+    for (let i = 1; i < pts.length; i++) {
+      const d = Math.abs(pts[i].x - t);
+      if (d < minDist) { minDist = d; nearest = pts[i]; }
+    }
+    // Only return if within 30s of a point
+    return minDist < 30000 ? nearest : null;
+  }
+
+  function getCanvasCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  canvas.addEventListener('mousemove', (e) => {
+    const coords = getCanvasCoords(e);
+    const pt = getNearestPoint(coords.x);
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = canvas.getContext('2d');
+
+    // Redraw the sparkline
+    renderSparkline();
+
+    if (!pt) {
+      tooltip.classList.remove('visible');
+      infoEl.textContent = 'Hover over chart';
+      infoEl.classList.remove('active');
+      return;
+    }
+
+    infoEl.textContent = '📍 ' + (pt.label || pt.type);
+    infoEl.classList.add('active');
+
+    // Draw crosshair on top
+    const rect = canvas.getBoundingClientRect();
+    const plotW = rect.width - PAD.left - PAD.right;
+    const plotH = rect.height - PAD.top - PAD.bottom;
+    const xFrac = (pt.x - sparklineMinX) / sparklineRangeX;
+    const cx = PAD.left + xFrac * plotW;
+    const cy = PAD.top + plotH - (pt.y / sparklineMaxY) * plotH;
+
+    ctx.save();
+    // Vertical line
+    ctx.strokeStyle = 'rgba(0,240,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(cx, PAD.top);
+    ctx.lineTo(cx, rect.height - PAD.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Horizontal line
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, cy);
+    ctx.lineTo(rect.width - PAD.right, cy);
+    ctx.stroke();
+
+    // Highlighted marker
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = pt.type === 'connect' || pt.type === 'device_up' ? '#22c55e' : '#ef4444';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // Position tooltip
+    const isConnect = pt.type === 'connect' || pt.type === 'device_up';
+    const d = new Date(pt.x);
+    const timeStr = d.toLocaleTimeString();
+    tooltip.innerHTML =
+      '<div class="tip-row"><span class="tip-label">Time</span><span class="tip-value">' + timeStr + '</span></div>' +
+      '<div class="tip-row"><span class="tip-label">Event</span><span class="tip-value ' + pt.type + '">' + (pt.label || pt.type) + '</span></div>' +
+      '<div class="tip-row"><span class="tip-label">Devices</span><span class="tip-value">' + pt.y + '</span></div>';
+
+    // Position tooltip above the crosshair, centered
+    const wrapRect = wrap.getBoundingClientRect();
+    let tipLeft = cx;
+    let tipTop = cy - 10;
+    // Keep tooltip within bounds
+    tipLeft = Math.max(60, Math.min(rect.width - 60, tipLeft));
+    tooltip.style.left = tipLeft + 'px';
+    tooltip.style.top = tipTop + 'px';
+    tooltip.classList.add('visible');
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+    infoEl.textContent = 'Hover over chart';
+    infoEl.classList.remove('active');
+    renderSparkline();
+  });
+
+  // Click to jump to related log entries
+  canvas.addEventListener('click', (e) => {
+    const coords = getCanvasCoords(e);
+    const pt = getNearestPoint(coords.x);
+    if (!pt) return;
+
+    // Find log entries near this time (within 2 seconds)
+    const logContainer = document.getElementById('logContainer');
+    const entries = logContainer.querySelectorAll('.log-entry');
+    const targetTime = pt.x;
+    let bestEntry = null;
+    let bestDiff = Infinity;
+    for (const entry of entries) {
+      const text = entry.textContent || '';
+      // Look for timestamp in log
+      const match = text.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+      if (match) {
+        const [_, h, m, s] = match;
+        const seconds = parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s);
+        const now = new Date();
+        const entryTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+          parseInt(h), parseInt(m), parseInt(s)).getTime();
+        const diff = Math.abs(entryTime - targetTime);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestEntry = entry;
+        }
+      }
+    }
+    if (bestEntry && bestDiff < 60000) {
+      bestEntry.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      bestEntry.style.background = 'rgba(0,240,255,0.08)';
+      setTimeout(() => { bestEntry.style.background = ''; }, 1500);
+    }
+    // Also add a filter chip for this event
+    const logSearch = document.getElementById('logSearch');
+    if (pt.label) {
+      logSearch.value = pt.label;
+      if (typeof filterLog === 'function') filterLog();
+    }
+  });
+}
+
+// ================================================================
 // BG PARTICLES
 // ================================================================
 (function initParticles() {
@@ -954,11 +1422,13 @@ function connect() {
     document.getElementById('serverInfo').textContent = `${host}:${port}`;
     addLog('system', `Connected to C2 server at ${host}:${port}`);
     renderSavedCommands();
+    recordConnectionEvent('connect', 'Dashboard connected');
   });
 
   socket.on('disconnect', () => {
     setStatus('disconnected');
     addLog('system', 'Disconnected from server');
+    recordConnectionEvent('disconnect', 'Dashboard disconnected');
   });
 
   socket.on('connect_error', (err) => {
@@ -967,6 +1437,15 @@ function connect() {
   });
 
   socket.on('devices:update', (deviceList) => {
+    const prevCount = Object.keys(devices).length;
+    const newCount = deviceList.length;
+    if (newCount > prevCount) {
+      const diff = newCount - prevCount;
+      recordConnectionEvent('device_up', diff + ' device(s) connected');
+    } else if (newCount < prevCount) {
+      const diff = prevCount - newCount;
+      recordConnectionEvent('device_down', diff + ' device(s) disconnected');
+    }
     devices = {};
     deviceList.forEach(d => { devices[d.socketId] = d; });
     updateDevices();
@@ -1814,12 +2293,13 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ─── SESSION UPTIME ───
+// ─── SESSION UPTIME + SPARKLINE REDRAW ───
 setInterval(() => {
   const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
   const h = Math.floor(elapsed / 3600);
   const m = Math.floor((elapsed % 3600) / 60);
   document.getElementById('statUptime').textContent = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  renderSparkline();
 }, 10000);
 
 // ================================================================
