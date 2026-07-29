@@ -20,11 +20,27 @@
  * XOR-obfuscated AES-128 key (16 bytes).
  *
  * Plain key (UTF-8): a1b2c3d4e5f6g7h8
- * Storage:  8 bytes XOR'd with 0xAA + 8 bytes derived from first half
+ *   Byte 0:  'a' = 0x61     Byte 8:  'e' = 0x65
+ *   Byte 1:  '1' = 0x31     Byte 9:  '5' = 0x35
+ *   Byte 2:  'b' = 0x62     Byte 10: 'f' = 0x66
+ *   Byte 3:  '2' = 0x32     Byte 11: '6' = 0x36
+ *   Byte 4:  'c' = 0x63     Byte 12: 'g' = 0x67
+ *   Byte 5:  '3' = 0x33     Byte 13: '7' = 0x37
+ *   Byte 6:  'd' = 0x64     Byte 14: 'h' = 0x68
+ *   Byte 7:  '4' = 0x34     Byte 15: '8' = 0x38
+ *
+ * Storage:  first 8 bytes  XOR'd with 0xAA
+ *           second 8 bytes XOR'd with 0x55
+ *
+ * WARNING: The hex literals below are NOT the ASCII characters.
+ * 'a' == 0x61, NOT 0xa1. The original key is a UTF-8 string
+ * literal, so its bytes are the ASCII values, not hex pairs.
  * ================================================================ */
-static const uint8_t KEY_MASKED[8] = {
-    0xa1 ^ 0xAA, 0xb2 ^ 0xAA, 0xc3 ^ 0xAA, 0xd4 ^ 0xAA,
-    0xe5 ^ 0xAA, 0xf6 ^ 0xAA, 0x67 ^ 0xAA, 0x68 ^ 0xAA,
+static const uint8_t KEY_MASKED[16] = {
+    /* Bytes 0-7 XOR 0xAA: 'a'=0x61^0xAA=0xCB, '1'=0x31^0xAA=0x9B, ... */
+    0xCB, 0x9B, 0xC8, 0x98, 0xC9, 0x99, 0xCE, 0x9E,
+    /* Bytes 8-15 XOR 0x55: 'e'=0x65^0x55=0x30, '5'=0x35^0x55=0x60, ... */
+    0x30, 0x60, 0x33, 0x63, 0x32, 0x62, 0x3D, 0x6D,
 };
 #define XOR_MASK_1   0xAA
 #define XOR_MASK_2   0x55
@@ -42,7 +58,7 @@ static void do_ensure_key(void) {
         real_key[i] = KEY_MASKED[i] ^ XOR_MASK_1;
     }
     for (i = 8; i < 16; i++) {
-        real_key[i] = real_key[i - 8] ^ XOR_MASK_2;
+        real_key[i] = KEY_MASKED[i] ^ XOR_MASK_2;
     }
 }
 

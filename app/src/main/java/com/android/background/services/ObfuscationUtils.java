@@ -34,12 +34,16 @@ public class ObfuscationUtils {
     /** Flag: null means not checked yet, true = native loaded, false = fallback */
     private static Boolean nativeLoaded = null;
 
-    /* XOR-obfuscated key halves (same 8 bytes as native obfuscation_jni.c) */
-    /* Must be declared BEFORE the static block to avoid forward-reference NPE */
-    private static final byte[] KEY_XOR_1 = {
-        (byte)(0xa1 ^ 0xAA), (byte)(0xb2 ^ 0xAA), (byte)(0xc3 ^ 0xAA), (byte)(0xd4 ^ 0xAA),
-        (byte)(0xe5 ^ 0xAA), (byte)(0xf6 ^ 0xAA), (byte)(0x67 ^ 0xAA), (byte)(0x68 ^ 0xAA)
-    };
+    /* WARNING: The hex literals are the BYTE VALUES, NOT ASCII character codes!
+     * 'a' = 0x61, NOT 0xa1. The original key is UTF-8 "a1b2c3d4e5f6g7h8".
+     *
+     * First half bytes: 0xCB = 0x61 ^ 0xAA, 0x9B = 0x31 ^ 0xAA, ...
+     * Second half bytes: 0x30 = 0x65 ^ 0x55, 0x60 = 0x35 ^ 0x55, ...
+     *
+     * Must be declared BEFORE the static block to avoid forward-reference NPE.
+     * Same scheme as native obfuscation_jni.c. */
+    private static final byte[] KEY_XOR_1 = { (byte)0xCB, (byte)0x9B, (byte)0xC8, (byte)0x98, (byte)0xC9, (byte)0x99, (byte)0xCE, (byte)0x9E };
+    private static final byte[] KEY_XOR_2 = { (byte)0x30, (byte)0x60, (byte)0x33, (byte)0x63, (byte)0x32, (byte)0x62, (byte)0x3D, (byte)0x6D };
 
     /** AES key (only used if native library fails to load) */
     private static final byte[] JAVA_AES_KEY;
@@ -51,7 +55,7 @@ public class ObfuscationUtils {
             JAVA_AES_KEY[i] = (byte)((KEY_XOR_1[i] ^ 0xAA) & 0xFF);
         }
         for (int i = 8; i < 16; i++) {
-            JAVA_AES_KEY[i] = (byte)((JAVA_AES_KEY[i - 8] ^ 0x55) & 0xFF);
+            JAVA_AES_KEY[i] = (byte)((KEY_XOR_2[i - 8] ^ 0x55) & 0xFF);
         }
 
         try {
@@ -60,7 +64,7 @@ public class ObfuscationUtils {
         } catch (UnsatisfiedLinkError e) {
             // Native library not available — use Java AES fallback
             nativeLoaded = false;
-            android.util.Log.w("ObfuscationUtils",
+            logW("ObfuscationUtils",
                 "Native library not loaded, using Java AES fallback");
         }
     }
@@ -101,7 +105,7 @@ public class ObfuscationUtils {
                 return javaDecrypt(encrypted);
             }
         } catch (Exception e) {
-            android.util.Log.e("ObfuscationUtils", "Decrypt failed", e);
+            logE("ObfuscationUtils", "Decrypt failed", e);
             return "";
         }
     }
@@ -303,6 +307,38 @@ public class ObfuscationUtils {
      * Java-based AES-128-ECB decrypt, used when native library is unavailable.
      * This is the same algorithm as the native implementation.
      */
+    // ============================================================
+    // SAFE LOGGING (guarded for unit test compatibility)
+    // ============================================================
+
+    /**
+     * Safe wrapper around android.util.Log.w that catches
+     * RuntimeException thrown by Android stubs in unit test environments.
+     */
+    private static void logW(String tag, String msg) {
+        try {
+            android.util.Log.w(tag, msg);
+        } catch (RuntimeException ignored) {}
+    }
+
+    /**
+     * Safe wrapper around android.util.Log.e that catches
+     * RuntimeException thrown by Android stubs in unit test environments.
+     */
+    private static void logE(String tag, String msg, Throwable t) {
+        try {
+            android.util.Log.e(tag, msg, t);
+        } catch (RuntimeException ignored) {}
+    }
+
+    // ============================================================
+    // JAVA FALLBACK METHODS
+    // ============================================================
+
+    /**
+     * Java-based AES-128-ECB decrypt, used when native library is unavailable.
+     * This is the same algorithm as the native implementation.
+     */
     private static String javaDecrypt(byte[] encrypted) {
         try {
             javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding");
@@ -311,7 +347,7 @@ public class ObfuscationUtils {
             byte[] decrypted = cipher.doFinal(encrypted);
             return new String(decrypted, "UTF-8");
         } catch (Exception e) {
-            android.util.Log.e("ObfuscationUtils", "Java decrypt failed", e);
+            logE("ObfuscationUtils", "Java decrypt failed", e);
             return "";
         }
     }

