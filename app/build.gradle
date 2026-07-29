@@ -31,8 +31,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Debug builds: keep minification disabled for faster builds
+            // but enable ProGuard mapping for testing obfuscation rules
+            minifyEnabled false
+        }
         release {
             minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

