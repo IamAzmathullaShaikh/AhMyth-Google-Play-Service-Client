@@ -57,6 +57,13 @@
 # OBFUSCATION: Aggressive renaming
 # ============================================================
 
+# CRITICAL: Keep the original package names for all Android entry points
+# (Activities, Services, Receivers, etc.) referenced in AndroidManifest.xml.
+# Without this rule, -repackageclasses below moves these classes to the
+# root package and the framework can't find them at runtime, causing
+# ClassNotFoundException on launch.
+-keeppackagenames com.android.background.services
+
 # Rename all remaining classes to a.a.a, a.a.b, etc.
 # This makes decompiled code extremely hard to read
 -repackageclasses ''

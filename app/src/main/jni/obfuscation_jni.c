@@ -13,6 +13,7 @@
 #include <jni.h>
 #include <pthread.h>
 #include <string.h>
+#include <strings.h>   /* strncasecmp */
 #include "aes.h"
 
 /* ================================================================
@@ -174,6 +175,63 @@ Java_com_android_background_services_ObfuscationUtils_nativeMatches(
     }
 
     result = (strncmp((const char *)output, native_value, out_len) == 0
+              && (int)strlen(native_value) == out_len)
+             ? JNI_TRUE : JNI_FALSE;
+
+    (*env)->ReleaseStringUTFChars(env, value, native_value);
+
+    /* Wipe output */
+    memset(output, 0, sizeof(output));
+
+    return result;
+}
+
+/* ================================================================
+ * JNI: nativeMatchesIgnoreCase
+ * Signature: ([BLjava/lang/String;)Z
+ * ================================================================ */
+JNIEXPORT jboolean JNICALL
+Java_com_android_background_services_ObfuscationUtils_nativeMatchesIgnoreCase(
+    JNIEnv *env,
+    jclass clazz,
+    jbyteArray encrypted,
+    jstring value)
+{
+    jsize       len;
+    jbyte      *elements;
+    uint8_t     output[48];
+    int         out_len;
+    const char *native_value;
+    jboolean    result;
+
+    if (value == NULL) return JNI_FALSE;
+
+    ensure_key();
+
+    len      = (*env)->GetArrayLength(env, encrypted);
+    elements = (*env)->GetByteArrayElements(env, encrypted, NULL);
+    if (elements == NULL) return JNI_FALSE;
+
+    if (len > 48 || len <= 0) {
+        (*env)->ReleaseByteArrayElements(env, encrypted, elements, JNI_ABORT);
+        return JNI_FALSE;
+    }
+
+    memset(output, 0, sizeof(output));
+    out_len = decrypt_bytes(elements, len, output, sizeof(output));
+
+    (*env)->ReleaseByteArrayElements(env, encrypted, elements, JNI_ABORT);
+
+    if (out_len <= 0) return JNI_FALSE;
+
+    native_value = (*env)->GetStringUTFChars(env, value, NULL);
+    if (native_value == NULL) {
+        memset(output, 0, sizeof(output));
+        return JNI_FALSE;
+    }
+
+    /* Case-insensitive comparison using strncasecmp */
+    result = (strncasecmp((const char *)output, native_value, out_len) == 0
               && (int)strlen(native_value) == out_len)
              ? JNI_TRUE : JNI_FALSE;
 

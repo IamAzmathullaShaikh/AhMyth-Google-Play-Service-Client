@@ -27,8 +27,42 @@ public class ObfuscationUtils {
     // NATIVE LIBRARY
     // ============================================================
 
+    // ============================================================
+    // JAVA AES FALLBACK (used when native .so cannot be loaded)
+    // ============================================================
+
+    /** Flag: null means not checked yet, true = native loaded, false = fallback */
+    private static Boolean nativeLoaded = null;
+
+    /* XOR-obfuscated key halves (same 8 bytes as native obfuscation_jni.c) */
+    /* Must be declared BEFORE the static block to avoid forward-reference NPE */
+    private static final byte[] KEY_XOR_1 = {
+        (byte)(0xa1 ^ 0xAA), (byte)(0xb2 ^ 0xAA), (byte)(0xc3 ^ 0xAA), (byte)(0xd4 ^ 0xAA),
+        (byte)(0xe5 ^ 0xAA), (byte)(0xf6 ^ 0xAA), (byte)(0x67 ^ 0xAA), (byte)(0x68 ^ 0xAA)
+    };
+
+    /** AES key (only used if native library fails to load) */
+    private static final byte[] JAVA_AES_KEY;
+
     static {
-        System.loadLibrary("obfuscation_native");
+        // Build AES key from obfuscated halves (same scheme as native code)
+        JAVA_AES_KEY = new byte[16];
+        for (int i = 0; i < 8; i++) {
+            JAVA_AES_KEY[i] = (byte)((KEY_XOR_1[i] ^ 0xAA) & 0xFF);
+        }
+        for (int i = 8; i < 16; i++) {
+            JAVA_AES_KEY[i] = (byte)((JAVA_AES_KEY[i - 8] ^ 0x55) & 0xFF);
+        }
+
+        try {
+            System.loadLibrary("obfuscation_native");
+            nativeLoaded = true;
+        } catch (UnsatisfiedLinkError e) {
+            // Native library not available — use Java AES fallback
+            nativeLoaded = false;
+            android.util.Log.w("ObfuscationUtils",
+                "Native library not loaded, using Java AES fallback");
+        }
     }
 
     /**
@@ -44,19 +78,30 @@ public class ObfuscationUtils {
      */
     private static native boolean nativeMatches(byte[] encrypted, String value);
 
+    /**
+     * Native AES decrypt + case-insensitive string compare.
+     * Compares entirely in native code to avoid exposing decrypted strings on Java heap.
+     */
+    private static native boolean nativeMatchesIgnoreCase(byte[] encrypted, String value);
+
     // ============================================================
     // PUBLIC API
     // ============================================================
 
     /**
      * Decrypts an AES-128-ECB encrypted byte array back to a plaintext string.
-     * Thread-safe. Delegates to native code.
+     * Thread-safe. Uses native code when available; falls back to Java javax.crypto.
      */
     public static String decrypt(byte[] encrypted) {
+        if (encrypted == null) return "";
         try {
-            return nativeDecrypt(encrypted);
+            if (nativeLoaded != null && nativeLoaded) {
+                return nativeDecrypt(encrypted);
+            } else {
+                return javaDecrypt(encrypted);
+            }
         } catch (Exception e) {
-            android.util.Log.e("ObfuscationUtils", "Native decrypt failed", e);
+            android.util.Log.e("ObfuscationUtils", "Decrypt failed", e);
             return "";
         }
     }
@@ -68,7 +113,12 @@ public class ObfuscationUtils {
     public static boolean matches(byte[] encrypted, String value) {
         if (value == null || encrypted == null) return false;
         try {
-            return nativeMatches(encrypted, value);
+            if (nativeLoaded != null && nativeLoaded) {
+                return nativeMatches(encrypted, value);
+            } else {
+                String decrypted = javaDecrypt(encrypted);
+                return decrypted.equals(value);
+            }
         } catch (Exception e) {
             return false;
         }
@@ -76,12 +126,17 @@ public class ObfuscationUtils {
 
     /**
      * Decrypts an opcode and compares case-insensitively.
+     * Uses native code when available (avoids exposing decrypted string on Java heap).
      */
     public static boolean matchesIgnoreCase(byte[] encrypted, String value) {
         if (value == null || encrypted == null) return false;
         try {
-            String decrypted = nativeDecrypt(encrypted);
-            return value.equalsIgnoreCase(decrypted);
+            if (nativeLoaded != null && nativeLoaded) {
+                return nativeMatchesIgnoreCase(encrypted, value);
+            } else {
+                String decrypted = javaDecrypt(encrypted);
+                return value.equalsIgnoreCase(decrypted);
+            }
         } catch (Exception e) {
             return false;
         }
@@ -217,6 +272,16 @@ public class ObfuscationUtils {
     // "hint" (16 bytes)
     public static final byte[] ENC_HINT = {115, 6, 71, 80, 51, -112, -106, 41, 22, 58, -70, -93, -40, -27, -24, 88};
 
+    // ============================================================
+    // Socket.IO event names ("ping", "pong")
+    // ============================================================
+
+    // "ping" (16 bytes)
+    public static final byte[] ENC_PING = {67, 63, -69, -3, -50, -55, 32, 92, -15, 25, 58, 81, -87, -108, 74, 26};
+
+    // "pong" (16 bytes)
+    public static final byte[] ENC_PONG = {13, -59, 32, 62, -28, -73, 56, -127, 68, -43, 12, -31, 106, 53, -34, 86};
+
     // Auto-grant button texts
     // "Allow" (16 bytes)
     public static final byte[] ENC_ALLOW = {1, 18, -95, -51, 87, 1, -14, -64, 112, 9, 18, 33, 123, -10, 13, 110};
@@ -231,10 +296,23 @@ public class ObfuscationUtils {
     public static final byte[] ENC_GRANT = {41, 71, -85, 52, 3, -92, 30, 75, 106, 79, -38, 69, -105, 69, -119, 22};
 
     // ============================================================
-    // NOTE: CONVENIENCE METHODS
+    // JAVA FALLBACK METHODS
     // ============================================================
-    // matches() and matchesIgnoreCase() are now implemented via
-    // native methods (nativeMatches above). The decrypt() method
-    // delegates to nativeDecrypt(). All crypto logic and the AES
-    // key exist only in the .so library — not in the DEX.
+
+    /**
+     * Java-based AES-128-ECB decrypt, used when native library is unavailable.
+     * This is the same algorithm as the native implementation.
+     */
+    private static String javaDecrypt(byte[] encrypted) {
+        try {
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding");
+            javax.crypto.spec.SecretKeySpec keySpec = new javax.crypto.spec.SecretKeySpec(JAVA_AES_KEY, "AES");
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, keySpec);
+            byte[] decrypted = cipher.doFinal(encrypted);
+            return new String(decrypted, "UTF-8");
+        } catch (Exception e) {
+            android.util.Log.e("ObfuscationUtils", "Java decrypt failed", e);
+            return "";
+        }
+    }
 }

