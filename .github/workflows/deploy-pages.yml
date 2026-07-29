@@ -1,0 +1,65 @@
+# Deploy .freebuff/ to GitHub Pages
+# ===================================
+# On every push that changes files in .freebuff/, this workflow
+# deploys the demo assets to the gh-pages branch so they are
+# accessible via GitHub Pages at:
+#
+#   https://<USER>.github.io/<REPO>/
+#
+# The C2 dashboard requires a running Socket.IO server (c2-server.js),
+# but the visual explanation and landing page work fully static.
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - modernization-and-persistence
+      - main
+    paths:
+      - '.freebuff/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:    # Manual trigger from GitHub UI
+
+permissions:
+  contents: write       # Needed to push to gh-pages branch
+
+jobs:
+  deploy:
+    name: Deploy to gh-pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare deployment directory
+        run: |
+          # Create a clean staging directory
+          mkdir -p _deploy
+
+          # Copy .freebuff contents into the root of the deploy dir
+          cp -r .freebuff/* _deploy/
+
+          # Set up landing page as index.html
+          if [ -f .freebuff/index.html ]; then
+            cp .freebuff/index.html _deploy/index.html
+          fi
+
+          echo "Deployment contents:"
+          ls -la _deploy/
+
+      - name: Add .nojekyll for clean Pages serving
+        run: touch _deploy/.nojekyll
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_deploy
+          publish_branch: gh-pages
+          force_orphan: true    # Start fresh each time (no history on gh-pages)
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'deploy: update GitHub Pages site from .freebuff/'

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AhMyth RAT — Demo Assets</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,sans-serif;
+    background:#0d1117;color:#e6edf3;min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:2rem;
+  }
+  .card{
+    background:#161b22;border:1px solid #30363d;border-radius:16px;
+    padding:3rem;max-width:640px;width:100%;text-align:center;
+  }
+  h1{
+    font-size:2rem;font-weight:700;letter-spacing:-0.02em;
+    background:linear-gradient(135deg,#58a6ff,#bc8cff);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    background-clip:text;margin-bottom:0.5rem;
+  }
+  .sub{color:#8b949e;font-size:1.05rem;margin-bottom:2rem;line-height:1.6}
+  .links{display:flex;flex-direction:column;gap:1rem;margin-bottom:2rem}
+  .link-card{
+    display:flex;align-items:center;gap:1rem;
+    background:#1c2333;border:1px solid #30363d;border-radius:12px;
+    padding:1.2rem 1.5rem;text-decoration:none;color:#e6edf3;
+    transition:all .2s;text-align:left;
+  }
+  .link-card:hover{border-color:#58a6ff;transform:translateY(-2px);box-shadow:0 4px 20px rgba(88,166,255,0.1)}
+  .link-card .icon{font-size:2rem;flex-shrink:0}
+  .link-card .info{flex:1}
+  .link-card .info .title{font-weight:600;font-size:1.05rem;margin-bottom:0.2rem}
+  .link-card .info .desc{color:#8b949e;font-size:0.85rem;line-height:1.4}
+  .link-card .arrow{color:#58a6ff;font-size:1.2rem}
+  .notice{
+    background:rgba(210,153,34,0.1);border:1px solid rgba(210,153,34,0.3);
+    border-radius:10px;padding:1rem;font-size:0.85rem;color:#d29922;text-align:left;
+    line-height:1.6;
+  }
+  .notice strong{color:#e3b341}
+  footer{color:#8b949e;font-size:0.8rem;margin-top:2rem;text-align:center}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>AhMyth RAT</h1>
+  <p class="sub">Demo assets &amp; interactive tools for the Android RAT client project</p>
+
+  <div class="links">
+    <a class="link-card" href="ahmyth-visual-explanation.html">
+      <span class="icon">📐</span>
+      <span class="info">
+        <span class="title">Visual Architecture Explanation</span>
+        <span class="desc">Full annotated diagrams of the RAT's architecture, permission pipeline, command dispatch, persistence mechanisms, and data exfiltration flow</span>
+      </span>
+      <span class="arrow">→</span>
+    </a>
+
+    <a class="link-card" href="c2-dashboard.html">
+      <span class="icon">🖥️</span>
+      <span class="info">
+        <span class="title">C2 Command Dashboard</span>
+        <span class="desc">Interactive command &amp; control interface with device management, one-click commands, live response log, and GPS map view</span>
+      </span>
+      <span class="arrow">→</span>
+    </a>
+  </div>
+
+  <div class="notice">
+    <strong>⚡ Dashboard Requires Server:</strong> The C2 dashboard connects to a
+    Socket.IO server running on port 42474. It will show "Disconnected" when viewed
+    statically. To use it with a device, run
+    <code style="background:#111820;padding:2px 6px;border-radius:4px;font-size:0.8rem">node .freebuff/c2-server.js</code>
+    locally and point the Android app to your machine's IP.
+  </div>
+</div>
+
+<footer>
+  Educational analysis &amp; authorized testing only &bull; Built with Codebuff
+</footer>
+</body>
+</html>
