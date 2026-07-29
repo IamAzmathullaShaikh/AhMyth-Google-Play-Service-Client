@@ -1,0 +1,273 @@
+# AhMyth Client — CI/CD Pipeline
+# ================================
+# Builds the Android APK, runs unit tests, checks lint, and uploads
+# the debug APK as a downloadable artifact on every push and PR.
+#
+# Required secrets (set in GitHub repo Settings → Secrets and variables):
+#   None required for debug builds.
+#
+# To customize the SOCKET_URL for CI builds, add a secret named
+# CI_SOCKET_URL and the workflow will use it. Otherwise it uses
+# the URL hardcoded in app/build.gradle.
+
+name: Build & Test
+
+on:
+  push:
+    branches:
+      - main
+      - modernization-and-persistence
+      - 'feat/**'
+      - 'fix/**'
+      - 'docs/**'
+  pull_request:
+    branches:
+      - main
+      - modernization-and-persistence
+  workflow_dispatch:    # Allow manual trigger from GitHub UI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPILE_SDK: 34
+  JAVA_VERSION: 17
+
+jobs:
+  # ──────────────────────────────────────────────
+  # JOB: wrapper-validation — ensures Gradle wrapper integrity
+  # ──────────────────────────────────────────────
+  wrapper-validation:
+    name: Validate Gradle Wrapper
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Gradle wrapper checksum
+        uses: gradle/actions/wrapper-validate@v4
+
+  # ──────────────────────────────────────────────
+  # JOB: Validate — checks formatting and lint
+  # ──────────────────────────────────────────────
+  validate:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [wrapper-validation]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.COMPILE_SDK }}
+          build-tools-version: latest
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            !~/.gradle/caches/build-cache-*
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Make Gradlew executable
+        run: chmod +x gradlew
+
+      - name: Run Android Lint
+        run: ./gradlew lintDebug --no-daemon
+
+      - name: Upload lint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-*.html
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────
+  # JOB: Test — runs unit tests
+  # ──────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.COMPILE_SDK }}
+          build-tools-version: latest
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            !~/.gradle/caches/build-cache-*
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Make Gradlew executable
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────
+  # JOB: Build — compiles and assembles the APK
+  # ──────────────────────────────────────────────
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.COMPILE_SDK }}
+          build-tools-version: latest
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            !~/.gradle/caches/build-cache-*
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Cache Gradle build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-*
+          key: ${{ runner.os }}-build-cache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-
+
+      - name: Make Gradlew executable
+        run: chmod +x gradlew
+
+      # Optionally override SOCKET_URL via repository secret
+      - name: Configure C2 server URL (if secret set)
+        if: secrets.CI_SOCKET_URL != ''
+        run: |
+          # Escape the URL for use in sed (handle special chars in URL)
+          OLD_URL=$(grep 'SOCKET_URL' app/build.gradle | sed "s/.*\"\\(.*\\)\".*/\\1/")
+          NEW_URL="${{ secrets.CI_SOCKET_URL }}"
+          echo "Overriding SOCKET_URL: $OLD_URL → $NEW_URL"
+          sed -i "s|$OLD_URL|$NEW_URL|g" app/build.gradle
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Check APK exists
+        run: |
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "APK size: $(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
+          else
+            echo "ERROR: APK not found at expected path!"
+            exit 1
+          fi
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload ProGuard mapping (if generated)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proguard-mapping
+          path: app/build/outputs/mapping/debug/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ──────────────────────────────────────────────
+  # JOB: Summary — aggregates results from all jobs
+  # ──────────────────────────────────────────────
+  summary:
+    name: Build Summary
+    needs: [validate, test, build]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          echo "## ✅ CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.validate.result }}" = "success" ]; then
+            echo "✅ **Lint & Validate** — passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Lint & Validate** — ${{ needs.validate.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.test.result }}" = "success" ]; then
+            echo "✅ **Unit Tests** — passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Unit Tests** — ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "✅ **APK Build** — passed (artifact: \`app-debug-apk\`)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **APK Build** — ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
