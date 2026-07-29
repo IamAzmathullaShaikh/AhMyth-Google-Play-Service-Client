@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Freebuff desktop internal state (not project files)
+.freebuff/desktop.db
+.freebuff/desktop.db-shm
+.freebuff/desktop.db-wal

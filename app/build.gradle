@@ -16,6 +16,12 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
+        // ============================================================
+        // Configure the AhMyth C2 Server URL here.
+        // Change the IP/PORT to match your running server instance.
+        // Format: "http://<SERVER_IP>:<PORT>"
+        // Example for local network: "http://192.168.1.100:42474"
+        // ============================================================
         buildConfigField "String", "SOCKET_URL", "\"http://192.168.65.113:42474\""
     }
 

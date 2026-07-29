@@ -51,11 +51,22 @@ object FileManager {
         if (path == null) return
         val file = File(path)
         if (file.exists()) {
-            val size = file.length().toInt()
-            val data = ByteArray(size)
             try {
+                val size = file.length()
+                // Safety limit: files larger than 20MB won't be downloaded over socket
+                val MAX_DOWNLOAD_SIZE = 20L * 1024 * 1024
+                if (size > MAX_DOWNLOAD_SIZE) {
+                    Log.e("FileManager", "File too large to download over socket: $size bytes")
+                    return
+                }
+                val data = ByteArray(size.toInt())
                 BufferedInputStream(FileInputStream(file)).use { buf ->
-                    buf.read(data, 0, data.size)
+                    var offset = 0
+                    while (offset < data.size) {
+                        val bytesRead = buf.read(data, offset, data.size - offset)
+                        if (bytesRead == -1) break
+                        offset += bytesRead
+                    }
                     val `object` = JSONObject()
                     `object`.put("file", true)
                     `object`.put("name", file.name)

