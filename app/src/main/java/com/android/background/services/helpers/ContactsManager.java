@@ -28,8 +28,10 @@ public class ContactsManager {
 
             while (cur.moveToNext()) {
                 JSONObject contact = new JSONObject();
-                String name = cur.getString(cur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));// for  number
-                String num = cur.getString(cur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));// for name
+                int nameIdx = cur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME);
+                int numIdx = cur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+                String name = nameIdx >= 0 ? cur.getString(nameIdx) : "";
+                String num = numIdx >= 0 ? cur.getString(numIdx) : "";
 
                 contact.put("phoneNo", num);
                 contact.put("name", name);

@@ -28,6 +28,7 @@ class LocManager : LocationListener {
         getLocation()
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
     fun getLocation(): Location? {
         try {
             locationManager = mContext?.getSystemService(LOCATION_SERVICE) as LocationManager?

