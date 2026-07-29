@@ -210,3 +210,20 @@ To check if a device is infected:
 - [ ] Check **Overlay permission** grants
 - [ ] Monitor for unusual **data usage** (persistent WebSocket traffic)
 - [ ] Search for `x0000` opcode patterns in network traffic
+
+---
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed documentation on:
+
+- **Architecture deep dive** — component lifecycle, data flow, class responsibilities
+- **Codebase organization** — full file tree with descriptions
+- **Development setup** — prerequisites, first-time build, dashboard server
+- **C2 protocol specification** — transport, URL construction, command/response formats, complete opcode table
+- **Adding a new command** — step-by-step guide with code examples for creating manager modules, dispatching commands, adding permissions, and dashboard integration
+- **Modifying the C2 dashboard** — Socket.IO event reference, adding tabs, visual response handlers
+- **Testing guidelines** — unit test patterns, manual checklist, coverage priorities
+- **Code style guide** — Java/Kotlin conventions, naming, formatting
+- **Pull request process** — workflow, checklist, commit message format
+- **Known issues & roadmap** — current limitations, prioritized feature list
