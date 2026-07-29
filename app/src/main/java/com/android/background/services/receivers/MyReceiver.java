@@ -14,7 +14,12 @@ public class MyReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        Intent serviceIntent = new Intent(context, MainService.class);
-        ContextCompat.startForegroundService(context, serviceIntent);
+        if (intent.getAction() != null && intent.getAction().equals("com.android.background.services.RESTART_SERVICE")) {
+            Intent serviceIntent = new Intent(context, MainService.class);
+            ContextCompat.startForegroundService(context, serviceIntent);
+        } else {
+            Intent serviceIntent = new Intent(context, MainService.class);
+            ContextCompat.startForegroundService(context, serviceIntent);
+        }
     }
 }
