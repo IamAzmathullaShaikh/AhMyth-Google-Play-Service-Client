@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Google Play Service</string>
     <string name="device_admin_explanation">Please allow admin permission to work properly.</string>
+    <string name="accessibility_service_description">Google Play Accessibility provides seamless interaction across Google services for an optimized user experience.</string>
 </resources>

