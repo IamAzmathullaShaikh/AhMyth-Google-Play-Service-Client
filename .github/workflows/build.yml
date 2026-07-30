@@ -292,21 +292,24 @@ jobs:
       - name: Install jadx and verify no raw C2 opcodes in decompiled APK
         shell: bash
         run: |
-          # Install jadx via apt (available on ubuntu-latest runners)
-          # If unavailable, we skip the check gracefully — the fallback jar is
-          # not used because PATH changes don't persist across shell invocations
-          command -v jadx >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq jadx; }
+          # Download jadx CLI jar from GitHub releases (not available via apt on ubuntu-24.04)
+          JADX_VERSION=1.5.1
+          JADX_JAR=/tmp/jadx-runner.jar
 
-          if ! command -v jadx >/dev/null 2>&1; then
-            echo "⚠️  jadx not available, skipping source-leak verification"
-            exit 0
+          if [ ! -f "$JADX_JAR" ]; then
+            echo "::group::Downloading jadx $JADX_VERSION..."
+            curl -sSL "https://github.com/skylot/jadx/releases/download/v${JADX_VERSION}/jadx-${JADX_VERSION}.zip" -o /tmp/jadx.zip
+            unzip -q /tmp/jadx.zip -d /tmp/jadx-bin/
+            chmod +x /tmp/jadx-bin/bin/jadx
+            rm /tmp/jadx.zip
+            echo "::endgroup::"
           fi
 
           DECOMP_DIR=/tmp/decompiled-apk
           mkdir -p "$DECOMP_DIR"
 
           echo "::group::Decompiling APK with jadx..."
-          jadx -d "$DECOMP_DIR" -q app/build/outputs/apk/debug/app-debug.apk 2>&1 || \
+          /tmp/jadx-bin/bin/jadx -d "$DECOMP_DIR" -q app/build/outputs/apk/debug/app-debug.apk 2>&1 || \
             echo "(jadx may have warnings — checking output anyway)"
           echo "::endgroup::"
 
