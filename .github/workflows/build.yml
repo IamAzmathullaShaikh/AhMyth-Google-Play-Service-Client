@@ -34,7 +34,6 @@ env:
   COMPILE_SDK: 34
   BUILD_TOOLS: 34.0.0
   JAVA_VERSION: 17
-  NDK_VERSION: 26.3.11579264
   # Debug keystore credentials (standard Android debug keystore defaults)
   DEBUG_KEYSTORE_PASS: android
   DEBUG_KEY_ALIAS: androiddebugkey
@@ -90,7 +89,7 @@ jobs:
           cmake --version || echo "⚠️ cmake not found — will be downloaded by Gradle"
           echo "::endgroup::"
           echo "::group::NDK locations"
-          ls -la "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK installed yet — Gradle will download NDK ${{ env.NDK_VERSION }}"
+          ls -la "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK installed yet — Gradle will download NDK from sdkmanager"
           echo "::endgroup::"
 
       - name: Cache Gradle dependencies
