@@ -25,3 +25,5 @@ local.properties
 # IDE & editor config (not project files)
 .claude/
 .idea/LanguageServersSettings.xml
+.freebuff/last-build.log
+.freebuff/release-assets/
