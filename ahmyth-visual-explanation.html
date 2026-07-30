@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AhMyth RAT Client — Visual Architecture</title>
+<style>
+  :root {
+    --bg:#0d1117;
+    --surface:#161b22;
+    --surface2:#1c2333;
+    --border:#30363d;
+    --text:#e6edf3;
+    --text-dim:#8b949e;
+    --accent:#58a6ff;
+    --accent-glow:rgba(88,166,255,0.15);
+    --red:#f85149;
+    --orange:#d29922;
+    --green:#3fb950;
+    --purple:#bc8cff;
+    --cyan:#39d2c0;
+    --pink:#f778ba;
+    --yellow:#e3b341;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden}
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important}}
+
+  /* header */
+  header{text-align:center;padding:4rem 1.5rem 2rem;position:relative;overflow:hidden}
+  header::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 40%,var(--accent-glow) 0%,transparent 50%),radial-gradient(circle at 70% 60%,rgba(188,140,255,0.08) 0%,transparent 50%);pointer-events:none}
+  header h1{font-size:2.6rem;font-weight:700;letter-spacing:-0.02em;background:linear-gradient(135deg,var(--accent),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;position:relative}
+  header .sub{color:var(--text-dim);font-size:1.1rem;margin-top:0.5rem;position:relative}
+  header .badge{display:inline-block;background:var(--red);color:#fff;font-size:0.7rem;font-weight:600;padding:0.2rem 0.7rem;border-radius:999px;text-transform:uppercase;letter-spacing:0.05em;margin-top:0.8rem}
+  .warning-banner{background:rgba(248,81,73,0.12);border:1px solid rgba(248,81,73,0.3);border-radius:8px;padding:1rem 1.4rem;margin:0 auto 2rem;max-width:760px;display:flex;align-items:flex-start;gap:0.8rem;font-size:0.9rem;color:var(--red);text-align:left}
+  .warning-banner .icon{font-size:1.3rem;flex-shrink:0;margin-top:0.1rem}
+
+  /* layout */
+  .container{max-width:1100px;margin:0 auto;padding:0 1.5rem}
+  section{margin-bottom:3.5rem}
+  section h2{font-size:1.5rem;font-weight:600;margin-bottom:1.2rem;display:flex;align-items:center;gap:0.6rem;color:var(--accent)}
+  section h2 .num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#000;font-size:0.85rem;font-weight:700}
+
+  /* cards */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.2rem}
+  .card-title{font-weight:600;font-size:1.05rem;margin-bottom:0.5rem}
+
+  /* SVG containers */
+  .svg-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem;overflow:auto;margin-bottom:1.5rem}
+  .svg-wrap svg{display:block;width:100%;height:auto;max-width:1000px;margin:0 auto}
+
+  /* grid */
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem}
+  @media(max-width:720px){.grid-2,.grid-3{grid-template-columns:1fr}}
+
+  /* tables */
+  .tbl{width:100%;border-collapse:collapse;font-size:0.9rem}
+  .tbl th{text-align:left;padding:0.6rem 0.8rem;background:var(--surface2);color:var(--text-dim);font-weight:500;border-bottom:1px solid var(--border)}
+  .tbl td{padding:0.5rem 0.8rem;border-bottom:1px solid var(--border)}
+  .tbl tr:last-child td{border-bottom:none}
+  .tbl code{background:var(--surface2);padding:0.15rem 0.4rem;border-radius:4px;font-size:0.8rem;color:var(--cyan)}
+
+  /* tags */
+  .tag{display:inline-block;font-size:0.7rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:4px;margin-right:0.3rem}
+  .tag-danger{background:rgba(248,81,73,0.2);color:var(--red)}
+  .tag-warn{background:rgba(210,153,34,0.2);color:var(--orange)}
+  .tag-info{background:rgba(88,166,255,0.2);color:var(--accent)}
+  .tag-green{background:rgba(63,185,80,0.2);color:var(--green)}
+  .tag-purple{background:rgba(188,140,255,0.2);color:var(--purple)}
+
+  /* highlight */
+  .hl{color:var(--accent)}
+  .hl-red{color:var(--red)}
+  .hl-green{color:var(--green)}
+  .hl-cyan{color:var(--cyan)}
+  .hl-orange{color:var(--orange)}
+  .dim{color:var(--text-dim);font-size:0.85rem}
+  .mono{font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:0.85rem}
+
+  .perm-grid{display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.8rem}
+  .perm-badge{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.7rem;font-size:0.78rem;font-family:'SF Mono','Consolas',monospace;color:var(--text)}
+  .perm-badge.danger{border-color:rgba(248,81,73,0.4);color:var(--red)}
+
+  /* callout */
+  .callout{background:var(--surface2);border-left:3px solid var(--accent);padding:1rem 1.2rem;border-radius:0 8px 8px 0;margin:1rem 0;font-size:0.9rem}
+
+  /* steps */
+  .step-list{list-style:none;counter-reset:step}
+  .step-list li{counter-increment:step;padding:0.6rem 0 0.6rem 2.2rem;position:relative;font-size:0.9rem}
+  .step-list li::before{content:counter(step);position:absolute;left:0;top:0.6rem;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#000;font-size:0.75rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+
+  footer{text-align:center;padding:2rem 1.5rem;color:var(--text-dim);font-size:0.85rem;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+<h1>AhMyth RAT Client</h1>
+<p class="sub"><span style="-webkit-text-fill-color:var(--text)">Android</span> Remote Access Trojan — Client Architecture &amp; Internal Mechanics</p>
+<span class="badge">⚠ Educational / Authorization Required</span>
+</header>
+
+<div class="container">
+
+<!-- WARNING -->
+<div class="warning-banner">
+<span class="icon">⚠️</span>
+<div><strong>Disclaimer:</strong> This is an unauthorized remote administration tool (RAT) targeting Android devices. It is intended for <strong>educational analysis and authorized testing only</strong>. Unauthorized deployment is illegal. This document explains the internal architecture transparently for defensive &amp; research purposes.</div>
+</div>
+
+<!-- 1. OVERVIEW -->
+<section>
+<h2><span class="num">1</span> High‑Level Architecture</h2>
+<p class="dim" style="margin-bottom:1rem">
+The client is an Android application disguised as <strong>"Google Play Service"</strong> that establishes a persistent WebSocket (Socket.IO) connection to a remote command server. It grants attackers full device control: reading SMS, exfiltrating contacts, recording audio, capturing photos, tracking GPS location, viewing the screen, wiping data, and more.
+</p>
+
+<div class="svg-wrap">
+<svg viewBox="0 0 1000 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#58a6ff"/></marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#f85149"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#3fb950"/></marker>
+    <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <linearGradient id="g-attacker" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f85149" stop-opacity="0.3"/><stop offset="100%" stop-color="#f85149" stop-opacity="1"/></linearGradient>
+    <linearGradient id="g-device" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#58a6ff" stop-opacity="0.3"/><stop offset="100%" stop-color="#58a6ff" stop-opacity="1"/></linearGradient>
+    <linearGradient id="g-server" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#d29922" stop-opacity="0.3"/><stop offset="100%" stop-color="#d29922" stop-opacity="1"/></linearGradient>
+  </defs>
+
+  <!-- attacker -->
+  <rect x="30" y="160" width="170" height="100" rx="14" fill="url(#g-attacker)" stroke="#f85149" stroke-width="2"/>
+  <text x="115" y="196" text-anchor="middle" fill="#f85149" font-size="13" font-weight="600">ATTACKER</text>
+  <text x="115" y="216" text-anchor="middle" fill="#8b949e" font-size="10">AhMyth Server Dashboard</text>
+  <text x="115" y="232" text-anchor="middle" fill="#8b949e" font-size="10">(C# / Node.js listener)</text>
+  <text x="115" y="248" text-anchor="middle" fill="#8b949e" font-size="10">Sends "orders" via Socket.IO</text>
+
+  <!-- server -->
+  <rect x="275" y="145" width="170" height="130" rx="14" fill="url(#g-server)" stroke="#d29922" stroke-width="2"/>
+  <text x="360" y="182" text-anchor="middle" fill="#d29922" font-size="13" font-weight="600">C2 SERVER</text>
+  <text x="360" y="200" text-anchor="middle" fill="#8b949e" font-size="10">WebSocket Bridge</text>
+  <text x="360" y="216" text-anchor="middle" fill="#8b949e" font-size="10">Socket.IO + Node.js</text>
+  <text x="360" y="232" text-anchor="middle" fill="#8b949e" font-size="10">Relays commands</text>
+  <text x="360" y="248" text-anchor="middle" fill="#8b949e" font-size="10">Stores exfiltrated data</text>
+  <text x="360" y="264" text-anchor="middle" fill="#8b949e" font-size="10">Manages victim sessions</text>
+
+  <!-- device -->
+  <rect x="520" y="140" width="190" height="140" rx="14" fill="url(#g-device)" stroke="#58a6ff" stroke-width="2"/>
+  <text x="615" y="178" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="600">VICTIM DEVICE</text>
+  <text x="615" y="196" text-anchor="middle" fill="#8b949e" font-size="10">Android App</text>
+  <text x="615" y="212" text-anchor="middle" fill="#8b949e" font-size="10">"Google Play Service"</text>
+  <text x="615" y="228" text-anchor="middle" fill="#8b949e" font-size="10">Foreground Service</text>
+  <text x="615" y="244" text-anchor="middle" fill="#8b949e" font-size="10">Socket.IO Client</text>
+  <text x="615" y="260" text-anchor="middle" fill="#8b949e" font-size="10">Manager Modules × 9</text>
+
+  <!-- flows -->
+  <line x1="200" y1="195" x2="270" y2="195" stroke="#f85149" stroke-width="2.5" marker-end="url(#arrow-red)" stroke-dasharray="6,3"/>
+  <text x="235" y="187" text-anchor="middle" fill="#f85149" font-size="9">Orders</text>
+
+  <line x1="445" y1="200" x2="515" y2="200" stroke="#d29922" stroke-width="2.5" marker-end="url(#arrow)" stroke-dasharray="6,3"/>
+  <text x="480" y="192" text-anchor="middle" fill="#d29922" font-size="9">Forward</text>
+
+  <line x1="615" y1="285" x2="615" y2="350" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="615" y1="350" x2="115" y2="350" stroke="#3fb950" stroke-width="2" stroke-dasharray="5,3"/>
+  <line x1="115" y1="350" x2="115" y2="265" stroke="#f85149" stroke-width="2" marker-end="url(#arrow-red)"/>
+  <text x="400" y="342" text-anchor="middle" fill="#3fb950" font-size="9">Exfiltrated data flows back</text>
+
+  <!-- phone icon -->
+  <rect x="780" y="95" width="120" height="230" rx="20" fill="#1c2333" stroke="#30363d" stroke-width="2"/>
+  <rect x="790" y="105" width="100" height="175" rx="4" fill="#0d1117"/>
+  <rect x="790" y="290" width="100" height="4" rx="2" fill="#30363d"/>
+  <circle cx="840" cy="310" r="8" fill="none" stroke="#30363d" stroke-width="1.5"/>
+  <!-- on-screen notification mock -->
+  <text x="840" y="130" text-anchor="middle" fill="#8b949e" font-size="8">Google Play Service</text>
+  <text x="840" y="145" text-anchor="middle" fill="#3fb950" font-size="7">● Running in background</text>
+  <text x="840" y="165" text-anchor="middle" fill="#f85149" font-size="7">⬤ Camera capturing</text>
+  <text x="840" y="180" text-anchor="middle" fill="#bc8cff" font-size="7">⬤ Mic recording</text>
+  <text x="840" y="195" text-anchor="middle" fill="#d29922" font-size="7">⬤ GPS tracking</text>
+  <text x="840" y="210" text-anchor="middle" fill="#f778ba" font-size="7">⬤ SMS reading</text>
+  <text x="840" y="225" text-anchor="middle" fill="#58a6ff" font-size="7">⬤ Screen capture</text>
+</svg>
+</div>
+</section>
+
+<!-- 2. PERMISSION ACQUISITION -->
+<section>
+<h2><span class="num">2</span> Permission Acquisition Pipeline</h2>
+<p class="dim" style="margin-bottom:0.8rem">
+Before any spyware function works, <code>MainActivity</code> orchestrates a multi-stage permission grant from the user. Each stage unlocks progressively more dangerous capabilities.
+</p>
+
+<div class="svg-wrap">
+<svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a-blue" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#58a6ff"/></marker>
+  </defs>
+  <style>
+    .st0{fill:#161b22;stroke:#30363d;stroke-width:1.5}
+    .st1{fill:#1c2333;stroke:#30363d;stroke-width:1}
+    .lbl{fill:#e6edf3;font-size:10px;text-anchor:middle}
+    .lbl-sm{fill:#8b949e;font-size:8px;text-anchor:middle}
+    .lbl-red{fill:#f85149;font-size:10px;text-anchor:middle;font-weight:600}
+    .lbl-blue{fill:#58a6ff;font-size:10px;text-anchor:middle;font-weight:600}
+    .lbl-green{fill:#3fb950;font-size:10px;text-anchor:middle;font-weight:600}
+  </style>
+
+  <!-- Stage 0: App Launched -->
+  <rect x="20" y="18" width="160" height="52" rx="8" class="st0"/>
+  <text x="100" y="38" class="lbl-blue">App Launched</text>
+  <text x="100" y="54" class="lbl-sm">User taps launcher icon</text>
+  <line x1="180" y1="44" x2="225" y2="44" stroke="#58a6ff" stroke-width="2" marker-end="url(#a-blue)"/>
+
+  <!-- Stage 1: Device Admin -->
+  <rect x="230" y="18" width="180" height="52" rx="8" class="st0"/>
+  <text x="320" y="38" class="lbl-red">Device Admin</text>
+  <text x="320" y="54" class="lbl-sm">Enables: Lock / Wipe / Reboot</text>
+  <line x1="410" y1="44" x2="455" y2="44" stroke="#58a6ff" stroke-width="2" marker-end="url(#a-blue)"/>
+
+  <!-- Stage 2: Runtime Permissions -->
+  <rect x="460" y="18" width="200" height="52" rx="8" class="st0"/>
+  <text x="560" y="38" class="lbl-blue">Runtime Permissions</text>
+  <text x="560" y="54" class="lbl-sm">13+ permissions requested at once</text>
+  <line x1="660" y1="44" x2="705" y2="44" stroke="#58a6ff" stroke-width="2" marker-end="url(#a-blue)"/>
+
+  <!-- Stage 3: Screen Capture -->
+  <rect x="710" y="18" width="180" height="52" rx="8" class="st0"/>
+  <text x="800" y="38" class="lbl-blue">Screen Capture</text>
+  <text x="800" y="54" class="lbl-sm">MediaProjection API grant</text>
+  <line x1="890" y1="44" x2="930" y2="44" stroke="#58a6ff" stroke-width="2" marker-end="url(#a-blue)"/>
+
+  <!-- Stage 4: Overlay / Storage -->
+  <rect x="935" y="18" width="55" height="52" rx="8" class="st0"/>
+  <text x="962" y="38" class="lbl-sm" font-size="7">Overlay</text>
+  <text x="962" y="52" class="lbl-sm" font-size="7">+Storage</text>
+
+  <!-- bottom row: continuation -->
+  <rect x="460" y="95" width="200" height="48" rx="8" class="st0"/>
+  <text x="560" y="114" class="lbl-blue">Notification Access</text>
+  <text x="560" y="128" class="lbl-sm">Reads all incoming notifications</text>
+  <line x1="560" y1="70" x2="560" y2="92" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#a-blue)"/>
+
+  <rect x="710" y="95" width="180" height="48" rx="8" class="st0"/>
+  <text x="800" y="114" class="lbl-blue">Battery Optimization Bypass</text>
+  <text x="800" y="128" class="lbl-sm">Prevents system kill</text>
+  <line x1="730" y1="70" x2="730" y2="92" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#a-blue)"/>
+
+  <!-- Hide icon -->
+  <rect x="935" y="95" width="55" height="48" rx="8" class="st0"/>
+  <text x="962" y="114" class="lbl-red" font-size="8">Hide</text>
+  <text x="962" y="126" class="lbl-sm" font-size="7">Launcher Icon</text>
+
+  <!-- Final: Service running -->
+  <rect x="460" y="170" width="380" height="44" rx="10" fill="#3fb950" fill-opacity="0.12" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="650" y="194" class="lbl-green">BACKGROUND SERVICE ACTIVE — MAIN ACTIVITY FINISHES</text>
+  <line x1="560" y1="143" x2="560" y2="167" stroke="#3fb950" stroke-width="1.5" marker-end="url(#a-blue)"/>
+  <line x1="800" y1="143" x2="800" y2="167" stroke="#3fb950" stroke-width="1.5" marker-end="url(#a-blue)"/>
+
+  <!-- permission groups -->
+  <rect x="20" y="250" width="290" height="250" rx="10" class="st1"/>
+  <text x="165" y="272" class="lbl-blue" font-size="11">🔐 Runtime Permissions (13+)</text>
+  <text x="32" y="292" class="lbl-sm" text-anchor="start">READ_SMS, SEND_SMS, RECEIVE_SMS</text>
+  <text x="32" y="308" class="lbl-sm" text-anchor="start">ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION</text>
+  <text x="32" y="324" class="lbl-sm" text-anchor="start">ACCESS_BACKGROUND_LOCATION</text>
+  <text x="32" y="340" class="lbl-sm" text-anchor="start">READ_PHONE_STATE, CALL_PHONE</text>
+  <text x="32" y="356" class="lbl-sm" text-anchor="start">READ_CONTACTS, WRITE_CONTACTS</text>
+  <text x="32" y="372" class="lbl-sm" text-anchor="start">RECORD_AUDIO (Mic)</text>
+  <text x="32" y="388" class="lbl-sm" text-anchor="start">CAMERA + FLASHLIGHT</text>
+  <text x="32" y="404" class="lbl-sm" text-anchor="start">READ_CALL_LOG</text>
+  <text x="32" y="420" class="lbl-sm" text-anchor="start">READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE</text>
+  <text x="32" y="436" class="lbl-sm" text-anchor="start">MANAGE_EXTERNAL_STORAGE (Android 11+)</text>
+  <text x="32" y="452" class="lbl-sm" text-anchor="start">ACCESS_MEDIA_LOCATION</text>
+  <text x="32" y="468" class="lbl-sm" text-anchor="start">QUERY_ALL_PACKAGES</text>
+  <text x="32" y="484" class="lbl-sm" text-anchor="start">SYSTEM_ALERT_WINDOW (Overlay)</text>
+
+  <!-- features unlocked -->
+  <rect x="340" y="250" width="290" height="250" rx="10" class="st1"/>
+  <text x="485" y="272" class="lbl-red" font-size="11">🗡 Capabilities Unlocked</text>
+  <text x="358" y="296" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Read all SMS inbox</text>
+  <text x="358" y="316" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Send SMS from device</text>
+  <text x="358" y="336" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> GPS location tracking</text>
+  <text x="358" y="356" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Record microphone audio</text>
+  <text x="358" y="376" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Take photos (front/back)</text>
+  <text x="358" y="396" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Exfiltrate contacts</text>
+  <text x="358" y="416" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Read call logs</text>
+  <text x="358" y="436" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Browse file system</text>
+  <text x="358" y="456" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Capture screen</text>
+  <text x="358" y="476" class="lbl-sm" text-anchor="start"><tspan fill="#f85149">●</tspan> Lock / Wipe / Reboot device</text>
+
+  <!-- admin policies -->
+  <rect x="660" y="250" width="290" height="250" rx="10" class="st1"/>
+  <text x="805" y="272" class="lbl-red" font-size="11">⚙ Device Admin Policies</text>
+  <text x="678" y="296" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Force lock screen</text>
+  <text x="678" y="316" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Reset password</text>
+  <text x="678" y="336" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Wipe all device data</text>
+  <text x="678" y="356" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Disable camera</text>
+  <text x="678" y="376" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Encrypt storage</text>
+  <text x="678" y="396" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Reboot device (7.0+)</text>
+  <text x="678" y="416" class="lbl-sm" text-anchor="start"><tspan fill="#d29922">■</tspan> Watch login attempts</text>
+  <line x1="660" y1="450" x2="950" y2="450" stroke="#30363d" stroke-width="1" stroke-dasharray="3,3"/>
+  <text x="805" y="470" class="lbl-sm" text-anchor="middle" fill="#f85149" font-size="9">Declared in device_admin.xml</text>
+  <text x="805" y="486" class="lbl-sm" text-anchor="middle" fill="#8b949e" font-size="8">User must approve dialog</text>
+</svg>
+</div>
+</section>
+
+<!-- 3. CLASS HIERARCHY -->
+<section>
+<h2><span class="num">3</span> Component Map &amp; Class Hierarchy</h2>
+
+<div class="svg-wrap">
+<svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#58a6ff"/></marker>
+  </defs>
+
+  <!-- MainActivity -->
+  <rect x="20" y="10" width="180" height="60" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="2"/>
+  <text x="110" y="34" text-anchor="middle" fill="#58a6ff" font-size="12" font-weight="600">MainActivity</text>
+  <text x="110" y="50" text-anchor="middle" fill="#8b949e" font-size="9">Entry point · Permission hub</text>
+  <text x="110" y="62" text-anchor="middle" fill="#8b949e" font-size="8">Hides icon · Opens fake Google page</text>
+
+  <!-- AdminReceiver -->
+  <rect x="20" y="85" width="180" height="40" rx="8" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="110" y="104" text-anchor="middle" fill="#d29922" font-size="10" font-weight="600">AdminReceiver</text>
+  <text x="110" y="118" text-anchor="middle" fill="#8b949e" font-size="8">DeviceAdminReceiver</text>
+
+  <!-- MyReceiver -->
+  <rect x="20" y="135" width="180" height="40" rx="8" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="110" y="154" text-anchor="middle" fill="#d29922" font-size="10" font-weight="600">MyReceiver</text>
+  <text x="110" y="168" text-anchor="middle" fill="#8b949e" font-size="8">Boot · SMS · Outgoing Call</text>
+
+  <!-- MainService -->
+  <rect x="20" y="190" width="180" height="60" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="2"/>
+  <text x="110" y="214" text-anchor="middle" fill="#3fb950" font-size="12" font-weight="600">MainService</text>
+  <text x="110" y="230" text-anchor="middle" fill="#8b949e" font-size="9">Foreground Service</text>
+  <text x="110" y="244" text-anchor="middle" fill="#8b949e" font-size="8">"Google Play Service" notification</text>
+
+  <!-- IOSocket -->
+  <rect x="20" y="265" width="180" height="50" rx="8" fill="#1c2333" stroke="#bc8cff" stroke-width="2"/>
+  <text x="110" y="286" text-anchor="middle" fill="#bc8cff" font-size="11" font-weight="600">IOSocket</text>
+  <text x="110" y="302" text-anchor="middle" fill="#8b949e" font-size="8">Singleton · Socket.IO client</text>
+
+  <!-- ConnectionManager -->
+  <rect x="20" y="330" width="180" height="50" rx="8" fill="#1c2333" stroke="#f778ba" stroke-width="2"/>
+  <text x="110" y="350" text-anchor="middle" fill="#f778ba" font-size="11" font-weight="600">ConnectionManager</text>
+  <text x="110" y="366" text-anchor="middle" fill="#8b949e" font-size="8">Command dispatcher · routes orders</text>
+
+  <!-- NotificationService -->
+  <rect x="20" y="395" width="180" height="50" rx="8" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="110" y="416" text-anchor="middle" fill="#d29922" font-size="10" font-weight="600">NotificationService</text>
+  <text x="110" y="432" text-anchor="middle" fill="#8b949e" font-size="8">Reads all notifications</text>
+
+  <!-- RestartServiceWorker -->
+  <rect x="20" y="458" width="180" height="40" rx="8" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="110" y="477" text-anchor="middle" fill="#3fb950" font-size="10" font-weight="600">RestartServiceWorker</text>
+  <text x="110" y="491" text-anchor="middle" fill="#8b949e" font-size="8">WorkManager · every 15 min</text>
+
+  <!-- Manager panels -->
+  <rect x="260" y="10" width="175" height="114" rx="10" fill="#1c2333" stroke="#f85149" stroke-width="1.5"/>
+  <text x="347" y="34" text-anchor="middle" fill="#f85149" font-size="11" font-weight="600">📷 CameraManager</text>
+  <text x="347" y="52" text-anchor="middle" fill="#8b949e" font-size="8">Camera.open(id)</text>
+  <text x="347" y="66" text-anchor="middle" fill="#8b949e" font-size="8">takePicture()</text>
+  <text x="347" y="80" text-anchor="middle" fill="#8b949e" font-size="8">JPEG compress 20%</text>
+  <text x="347" y="94" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000ca</text>
+  <text x="347" y="110" text-anchor="middle" fill="#8b949e" font-size="8">Front / Back / List</text>
+
+  <rect x="260" y="134" width="175" height="96" rx="10" fill="#1c2333" stroke="#f85149" stroke-width="1.5"/>
+  <text x="347" y="158" text-anchor="middle" fill="#f85149" font-size="11" font-weight="600">🎤 MicManager</text>
+  <text x="347" y="176" text-anchor="middle" fill="#8b949e" font-size="8">MediaRecorder</text>
+  <text x="347" y="190" text-anchor="middle" fill="#8b949e" font-size="8">AAC / MPEG-4</text>
+  <text x="347" y="204" text-anchor="middle" fill="#8b949e" font-size="8">Timer-based stop</text>
+  <text x="347" y="218" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000mc</text>
+
+  <rect x="260" y="240" width="175" height="96" rx="10" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="347" y="264" text-anchor="middle" fill="#d29922" font-size="11" font-weight="600">📍 LocManager</text>
+  <text x="347" y="282" text-anchor="middle" fill="#8b949e" font-size="8">GPS + Network provider</text>
+  <text x="347" y="296" text-anchor="middle" fill="#8b949e" font-size="8">LocationListener</text>
+  <text x="347" y="310" text-anchor="middle" fill="#8b949e" font-size="8">Lat / Lng coordinates</text>
+  <text x="347" y="324" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000lm</text>
+
+  <rect x="260" y="346" width="175" height="78" rx="10" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="347" y="370" text-anchor="middle" fill="#d29922" font-size="11" font-weight="600">💬 SMSManager</text>
+  <text x="347" y="388" text-anchor="middle" fill="#8b949e" font-size="8">content://sms/inbox</text>
+  <text x="347" y="402" text-anchor="middle" fill="#8b949e" font-size="8">Send via SmsManager</text>
+  <text x="347" y="416" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000sm</text>
+
+  <!-- second column -->
+  <rect x="460" y="10" width="175" height="78" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="547" y="34" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="600">📁 FileManager</text>
+  <text x="547" y="52" text-anchor="middle" fill="#8b949e" font-size="8">walk() · List directory</text>
+  <text x="547" y="66" text-anchor="middle" fill="#8b949e" font-size="8">downloadFile() · Read bytes</text>
+  <text x="547" y="80" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000fm</text>
+
+  <rect x="460" y="98" width="175" height="78" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="547" y="122" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="600">👤 ContactsManager</text>
+  <text x="547" y="140" text-anchor="middle" fill="#8b949e" font-size="8">ContactsContract</text>
+  <text x="547" y="154" text-anchor="middle" fill="#8b949e" font-size="8">Name + Phone Number</text>
+  <text x="547" y="168" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000cn</text>
+
+  <rect x="460" y="186" width="175" height="78" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="547" y="210" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="600">📞 CallsManager</text>
+  <text x="547" y="228" text-anchor="middle" fill="#8b949e" font-size="8">CallLog.Calls.CONTENT_URI</text>
+  <text x="547" y="242" text-anchor="middle" fill="#8b949e" font-size="8">Number · Name · Duration · Type</text>
+  <text x="547" y="256" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000cl</text>
+
+  <rect x="460" y="274" width="175" height="96" rx="10" fill="#1c2333" stroke="#f778ba" stroke-width="1.5"/>
+  <text x="547" y="298" text-anchor="middle" fill="#f778ba" font-size="11" font-weight="600">🖥 ScreenManager</text>
+  <text x="547" y="316" text-anchor="middle" fill="#8b949e" font-size="8">MediaProjection API</text>
+  <text x="547" y="330" text-anchor="middle" fill="#8b949e" font-size="8">VirtualDisplay → ImageReader</text>
+  <text x="547" y="344" text-anchor="middle" fill="#8b949e" font-size="8">Bitmap → Base64 → JSON</text>
+  <text x="547" y="358" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000sc</text>
+
+  <rect x="460" y="380" width="175" height="96" rx="10" fill="#1c2333" stroke="#bc8cff" stroke-width="1.5"/>
+  <text x="547" y="404" text-anchor="middle" fill="#bc8cff" font-size="11" font-weight="600">📱 AppsListManager</text>
+  <text x="547" y="422" text-anchor="middle" fill="#8b949e" font-size="8">getInstalledPackages()</text>
+  <text x="547" y="436" text-anchor="middle" fill="#8b949e" font-size="8">App Name · Package · Version</text>
+  <text x="547" y="450" text-anchor="middle" fill="#8b949e" font-size="8">Emit x0000apps</text>
+
+  <!-- connection arrows -->
+  <line x1="200" y1="40" x2="255" y2="40" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#a2)"/>
+  <line x1="200" y1="220" x2="255" y2="220" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#a2)"/>
+  <line x1="200" y1="290" x2="255" y2="290" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#a2)"/>
+  <line x1="200" y1="355" x2="255" y2="355" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#a2)"/>
+
+  <!-- right side legend -->
+  <rect x="690" y="10" width="280" height="100" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1"/>
+  <text x="830" y="34" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Legend</text>
+  <rect x="702" y="44" width="12" height="12" rx="2" fill="#f85149"/>
+  <text x="720" y="54" fill="#8b949e" font-size="9">Sensor / hardware managers</text>
+  <rect x="702" y="62" width="12" height="12" rx="2" fill="#58a6ff"/>
+  <text x="720" y="72" fill="#8b949e" font-size="9">Data managers (file, contact, call)</text>
+  <rect x="702" y="80" width="12" height="12" rx="2" fill="#d29922"/>
+  <text x="720" y="90" fill="#8b949e" font-size="9">Communication / location managers</text>
+
+  <rect x="690" y="120" width="280" height="128" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1"/>
+  <text x="830" y="144" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Socket.IO Event Names (Opcodes)</text>
+  <text x="702" y="164" fill="#f85149" font-size="9">x0000ca — Camera (capture / list)</text>
+  <text x="702" y="180" fill="#f778ba" font-size="9">x0000mc — Microphone (record audio)</text>
+  <text x="702" y="196" fill="#3fb950" font-size="9">x0000fm — File Manager (ls / download)</text>
+  <text x="702" y="212" fill="#d29922" font-size="9">x0000sm — SMS (list / send)</text>
+  <text x="702" y="228" fill="#58a6ff" font-size="9">x0000lm — Location (GPS coords)</text>
+  <text x="702" y="244" fill="#bc8cff" font-size="9">x0000sc — Screen capture</text>
+
+  <rect x="690" y="258" width="280" height="60" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1"/>
+  <text x="702" y="280" fill="#3fb950" font-size="9">x0000apps — Installed apps list</text>
+  <text x="702" y="296" fill="#58a6ff" font-size="9">x0000cl — Call logs</text>
+  <text x="702" y="312" fill="#58a6ff" font-size="9">x0000cn — Contacts</text>
+
+  <rect x="690" y="328" width="280" height="94" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1"/>
+  <text x="830" y="352" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Action / Admin Opcodes</text>
+  <text x="702" y="372" fill="#f85149" font-size="9">x0000dm — Dial number (CALL_PHONE)</text>
+  <text x="702" y="388" fill="#f85149" font-size="9">x0000runApp — Launch app by package</text>
+  <text x="702" y="404" fill="#f85149" font-size="9">x0000openUrl — Open URL in browser</text>
+  <text x="702" y="420" fill="#f85149" font-size="9">x0000deleteFF — Delete file/folder</text>
+
+  <rect x="690" y="432" width="280" height="64" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1"/>
+  <text x="702" y="452" fill="#d29922" font-size="9">x0000lockDevice — Lock screen</text>
+  <text x="702" y="468" fill="#d29922" font-size="9">x0000wipeDevice — Factory reset</text>
+  <text x="702" y="484" fill="#d29922" font-size="9">x0000rebootDevice — Reboot (7.0+)</text>
+</svg>
+</div>
+</section>
+
+<!-- 4. CONNECTION & COMMAND FLOW -->
+<section>
+<h2><span class="num">4</span> Connection Lifecycle &amp; Command Dispatch</h2>
+
+<div class="svg-wrap">
+<svg viewBox="0 0 1000 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a3" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#58a6ff"/></marker>
+    <marker id="a3r" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#f85149"/></marker>
+  </defs>
+
+  <!-- Sequence boxes timeline-style -->
+  <rect x="40" y="10" width="200" height="50" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="2"/>
+  <text x="140" y="33" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="600">1. MainService starts</text>
+  <text x="140" y="48" text-anchor="middle" fill="#8b949e" font-size="8">Foreground notification shown</text>
+  <line x1="240" y1="35" x2="285" y2="35" stroke="#3fb950" stroke-width="2" marker-end="url(#a3)"/>
+
+  <rect x="290" y="10" width="200" height="50" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="2"/>
+  <text x="390" y="33" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="600">2. ConnectionManager</text>
+  <text x="390" y="48" text-anchor="middle" fill="#8b949e" font-size="8">sendReq() called</text>
+  <line x1="490" y1="35" x2="535" y2="35" stroke="#3fb950" stroke-width="2" marker-end="url(#a3)"/>
+
+  <rect x="540" y="10" width="220" height="50" rx="10" fill="#1c2333" stroke="#bc8cff" stroke-width="2"/>
+  <text x="650" y="33" text-anchor="middle" fill="#bc8cff" font-size="11" font-weight="600">3. IOSocket singleton</text>
+  <text x="650" y="48" text-anchor="middle" fill="#8b949e" font-size="8">IO.socket(url + query params)</text>
+  <line x1="760" y1="35" x2="805" y2="35" stroke="#bc8cff" stroke-width="2" marker-end="url(#a3)"/>
+
+  <rect x="810" y="10" width="160" height="50" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="2"/>
+  <text x="890" y="33" text-anchor="middle" fill="#58a6ff" font-size="11" font-weight="600">4. Socket connects</text>
+  <text x="890" y="48" text-anchor="middle" fill="#8b949e" font-size="8">?model=&amp;manf=&amp;release=&amp;id=</text>
+
+  <!-- Connection params detail -->
+  <rect x="40" y="80" width="500" height="80" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1"/>
+  <text x="290" y="104" text-anchor="middle" fill="#e6edf3" font-size="11" font-weight="600">Connection URL Construction (BuildConfig.SOCKET_URL + query)</text>
+  <text x="52" y="124" fill="#8b949e" font-size="9" font-family="monospace">Base URL: http://192.168.65.113:42474</text>
+  <text x="52" y="140" fill="#8b949e" font-size="9" font-family="monospace">Params:  ?model=Pixel_6 &amp; manf=Google &amp; release=14 &amp; id=ABCDEF123456</text>
+  <text x="52" y="156" fill="#d29922" font-size="8" font-family="monospace">Note: Reconnection enabled · delay: 5s · max delay: 999,999,999ms (~11.5 days)</text>
+
+  <!-- Ping/Pong -->
+  <rect x="590" y="80" width="200" height="80" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="690" y="104" text-anchor="middle" fill="#3fb950" font-size="11" font-weight="600">Keep‑Alive</text>
+  <text x="602" y="122" fill="#8b949e" font-size="9">Server → Client: "ping"</text>
+  <text x="602" y="138" fill="#8b949e" font-size="9">Client → Server: "pong"</text>
+  <text x="602" y="154" fill="#8b949e" font-size="8">Socket.IO built‑in heartbeat</text>
+
+  <rect x="830" y="80" width="150" height="80" rx="10" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="905" y="104" text-anchor="middle" fill="#d29922" font-size="11" font-weight="600">Command</text>
+  <text x="905" y="122" text-anchor="middle" fill="#8b949e" font-size="9">Listener: "order"</text>
+  <text x="905" y="138" text-anchor="middle" fill="#8b949e" font-size="9">JSON {order, extra}</text>
+  <text x="905" y="154" text-anchor="middle" fill="#8b949e" font-size="8">Switch dispatch</text>
+
+  <!-- Dispatch flow -->
+  <rect x="40" y="185" width="940" height="30" rx="8" fill="#f85149" fill-opacity="0.08" stroke="#f85149" stroke-width="1"/>
+  <text x="510" y="204" text-anchor="middle" fill="#f85149" font-size="11" font-weight="600">ConnectionManager switch(data.order) dispatches to manager methods</text>
+
+  <!-- Manager dispatch branches -->
+  <line x1="60" y1="215" x2="60" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="160" y1="215" x2="160" y2="308" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="260" y1="215" x2="260" y2="308" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="360" y1="215" x2="360" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="460" y1="215" x2="460" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="560" y1="215" x2="560" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="660" y1="215" x2="660" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="760" y1="215" x2="760" y2="308" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="860" y1="215" x2="860" y2="308" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="930" y1="215" x2="930" y2="260" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+
+  <rect x="25" y="265" width="70" height="55" rx="6" fill="#1c2333" stroke="#f85149" stroke-width="1"/>
+  <text x="60" y="286" text-anchor="middle" fill="#f85149" font-size="8" font-weight="600">x0000ca</text>
+  <text x="60" y="302" text-anchor="middle" fill="#8b949e" font-size="7">Camera</text>
+
+  <rect x="325" y="265" width="70" height="55" rx="6" fill="#1c2333" stroke="#f85149" stroke-width="1"/>
+  <text x="360" y="286" text-anchor="middle" fill="#f85149" font-size="8" font-weight="600">x0000mc</text>
+  <text x="360" y="302" text-anchor="middle" fill="#8b949e" font-size="7">Mic</text>
+
+  <rect x="425" y="265" width="70" height="55" rx="6" fill="#1c2333" stroke="#58a6ff" stroke-width="1"/>
+  <text x="460" y="286" text-anchor="middle" fill="#58a6ff" font-size="8" font-weight="600">x0000fm</text>
+  <text x="460" y="302" text-anchor="middle" fill="#8b949e" font-size="7">File</text>
+
+  <rect x="525" y="265" width="70" height="55" rx="6" fill="#1c2333" stroke="#d29922" stroke-width="1"/>
+  <text x="560" y="286" text-anchor="middle" fill="#d29922" font-size="8" font-weight="600">x0000sm</text>
+  <text x="560" y="302" text-anchor="middle" fill="#8b949e" font-size="7">SMS</text>
+
+  <rect x="895" y="265" width="70" height="55" rx="6" fill="#1c2333" stroke="#bc8cff" stroke-width="1"/>
+  <text x="930" y="286" text-anchor="middle" fill="#bc8cff" font-size="8" font-weight="600">x0000lm</text>
+  <text x="930" y="302" text-anchor="middle" fill="#8b949e" font-size="7">Location</text>
+
+  <rect x="125" y="313" width="70" height="55" rx="6" fill="#1c2333" stroke="#58a6ff" stroke-width="1"/>
+  <text x="160" y="334" text-anchor="middle" fill="#58a6ff" font-size="8" font-weight="600">x0000cn</text>
+  <text x="160" y="350" text-anchor="middle" fill="#8b949e" font-size="7">Contacts</text>
+
+  <rect x="225" y="313" width="70" height="55" rx="6" fill="#1c2333" stroke="#58a6ff" stroke-width="1"/>
+  <text x="260" y="334" text-anchor="middle" fill="#58a6ff" font-size="8" font-weight="600">x0000cl</text>
+  <text x="260" y="350" text-anchor="middle" fill="#8b949e" font-size="7">Calls</text>
+
+  <rect x="725" y="313" width="70" height="55" rx="6" fill="#1c2333" stroke="#f778ba" stroke-width="1"/>
+  <text x="760" y="334" text-anchor="middle" fill="#f778ba" font-size="8" font-weight="600">x0000sc</text>
+  <text x="760" y="350" text-anchor="middle" fill="#8b949e" font-size="7">Screen</text>
+
+  <rect x="25" y="388" width="170" height="55" rx="6" fill="#1c2333" stroke="#f85149" stroke-width="1"/>
+  <text x="110" y="410" text-anchor="middle" fill="#f85149" font-size="9" font-weight="600">Destructive Actions</text>
+  <text x="110" y="428" text-anchor="middle" fill="#8b949e" font-size="8">x0000dm · x0000lockDevice</text>
+  <text x="110" y="440" text-anchor="middle" fill="#8b949e" font-size="8">x0000wipeDevice · x0000rebootDevice</text>
+
+  <rect x="230" y="388" width="170" height="55" rx="6" fill="#1c2333" stroke="#3fb950" stroke-width="1"/>
+  <text x="315" y="410" text-anchor="middle" fill="#3fb950" font-size="9" font-weight="600">App / URL Actions</text>
+  <text x="315" y="428" text-anchor="middle" fill="#8b949e" font-size="8">x0000runApp · x0000openUrl</text>
+  <text x="315" y="440" text-anchor="middle" fill="#8b949e" font-size="8">x0000deleteFF · x0000apps</text>
+
+  <rect x="440" y="388" width="200" height="55" rx="6" fill="#1c2333" stroke="#d29922" stroke-width="1"/>
+  <text x="540" y="410" text-anchor="middle" fill="#d29922" font-size="9" font-weight="600">All results emitted via Socket.IO</text>
+  <text x="540" y="428" text-anchor="middle" fill="#8b949e" font-size="8">JSON response with status/data</text>
+  <text x="540" y="440" text-anchor="middle" fill="#8b949e" font-size="8">Same event name as request</text>
+</svg>
+</div>
+</section>
+
+<!-- 5. PERSISTENCE MECHANISMS -->
+<section>
+<h2><span class="num">5</span> Persistence &amp; Anti‑Removal</h2>
+<p class="dim" style="margin-bottom:1rem">
+The client uses multiple techniques to survive restarts, task kills, and user attempts to stop it.
+</p>
+
+<div class="grid-3">
+<div class="card">
+<div class="card-title" style="color:var(--green)">🔄 Foreground Service</div>
+<p class="dim" style="font-size:0.85rem">
+<code>MainService</code> runs as a <strong>foreground service</strong> with an ongoing notification titled <em>"Google Play Service"</em> — making it less likely to be killed by Android's OOM killer. The service uses <code>START_STICKY</code> so the system recreates it if killed.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">⏰ WorkManager Restarter</div>
+<p class="dim" style="font-size:0.85rem">
+<code>RestartServiceWorker</code> runs <strong>every 15 minutes</strong> via <code>PeriodicWorkRequest</code>. If <code>MainService</code> was killed, this worker re‑launches it. Uses <code>ExistingPeriodicWorkPolicy.KEEP</code> to avoid duplicates.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">📡 Boot Receiver</div>
+<p class="dim" style="font-size:0.85rem">
+<code>MyReceiver</code> listens for <code>BOOT_COMPLETED</code>, <code>QUICKBOOT_POWERON</code>, and a custom <code>RESTART_SERVICE</code> intent — restarting the service immediately when the device turns on.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">⚡ Wake Lock</div>
+<p class="dim" style="font-size:0.85rem">
+Acquires a <code>PARTIAL_WAKE_LOCK</code> for 10 minutes to keep the CPU running even when the screen is off. Prevents the service from being suspended during deep sleep.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">🔋 Battery Optimization Bypass</div>
+<p class="dim" style="font-size:0.85rem">
+Requests <code>REQUEST_IGNORE_BATTERY_OPTIMIZATIONS</code> through <code>Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS</code> — preventing the device from putting the app to sleep to save power.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">🏠 Task Removal Restart</div>
+<p class="dim" style="font-size:0.85rem">
+<code>onTaskRemoved()</code> in <code>MainService</code> immediately re‑launches itself via a new intent when the user swipes the app away from recents.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">👁 Notification Listener</div>
+<p class="dim" style="font-size:0.85rem">
+<code>NotificationService</code> binds as a <code>NotificationListenerService</code>, reading all incoming notifications (app, title, content, timestamp) and exfiltrating them via <code>x0000nt</code> event.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">🚫 Icon Hiding</div>
+<p class="dim" style="font-size:0.85rem">
+<code>hideIcon()</code> disables the launcher activity via <code>PackageManager.COMPONENT_ENABLED_STATE_DISABLED</code>, removing the app from the app drawer so the user cannot easily find and uninstall it.
+</p>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--green)">🛡 Device Admin Persistence</div>
+<p class="dim" style="font-size:0.85rem">
+Once Device Admin is granted, the user cannot uninstall the app without first deactivating Device Admin — which requires a multi‑step process in Settings. This is a significant barrier.
+</p>
+</div>
+</div>
+</section>
+
+<!-- 6. DATA FLOW DIAGRAM -->
+<section>
+<h2><span class="num">6</span> End‑to‑End Data Exfiltration Flow</h2>
+
+<div class="svg-wrap">
+<svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a4" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#58a6ff"/></marker>
+    <marker id="a4g" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#3fb950"/></marker>
+  </defs>
+
+  <!-- row: SMS example -->
+  <text x="20" y="30" fill="#e6edf3" font-size="12" font-weight="600">Example: SMS Exfiltration</text>
+
+  <rect x="20" y="45" width="140" height="52" rx="8" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="90" y="67" text-anchor="middle" fill="#58a6ff" font-size="9" font-weight="600">"order": "x0000sm"</text>
+  <text x="90" y="83" text-anchor="middle" fill="#8b949e" font-size="8">"extra": "ls"</text>
+  <line x1="160" y1="71" x2="205" y2="71" stroke="#58a6ff" stroke-width="2" marker-end="url(#a4)"/>
+
+  <rect x="210" y="45" width="160" height="52" rx="8" fill="#1c2333" stroke="#f778ba" stroke-width="1.5"/>
+  <text x="290" y="67" text-anchor="middle" fill="#f778ba" font-size="9" font-weight="600">ConnectionManager</text>
+  <text x="290" y="83" text-anchor="middle" fill="#8b949e" font-size="8">Calls SMSManager.getSMSList()</text>
+  <line x1="370" y1="71" x2="415" y2="71" stroke="#f778ba" stroke-width="2" marker-end="url(#a4)"/>
+
+  <rect x="420" y="45" width="160" height="52" rx="8" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="500" y="67" text-anchor="middle" fill="#d29922" font-size="9" font-weight="600">SMSManager</text>
+  <text x="500" y="83" text-anchor="middle" fill="#8b949e" font-size="8">content://sms/inbox</text>
+  <line x1="580" y1="71" x2="625" y2="71" stroke="#d29922" stroke-width="2" marker-end="url(#a4)"/>
+
+  <rect x="630" y="45" width="160" height="52" rx="8" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="710" y="67" text-anchor="middle" fill="#3fb950" font-size="9" font-weight="600">JSON Result</text>
+  <text x="710" y="83" text-anchor="middle" fill="#8b949e" font-size="8">{smsList: [{phoneNo, msg}]}</text>
+  <line x1="790" y1="71" x2="835" y2="71" stroke="#3fb950" stroke-width="2" marker-end="url(#a4g)"/>
+
+  <rect x="840" y="45" width="140" height="52" rx="8" fill="#1c2333" stroke="#bc8cff" stroke-width="1.5"/>
+  <text x="910" y="67" text-anchor="middle" fill="#bc8cff" font-size="9" font-weight="600">Socket Emit</text>
+  <text x="910" y="83" text-anchor="middle" fill="#8b949e" font-size="8">"x0000sm" → Server</text>
+
+  <!-- row: Camera example -->
+  <text x="20" y="140" fill="#e6edf3" font-size="12" font-weight="600">Example: Camera Capture</text>
+
+  <rect x="20" y="155" width="140" height="52" rx="8" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+  <text x="90" y="177" text-anchor="middle" fill="#58a6ff" font-size="9" font-weight="600">"order": "x0000ca"</text>
+  <text x="90" y="193" text-anchor="middle" fill="#8b949e" font-size="8">"extra": "1" (back cam)</text>
+  <line x1="160" y1="181" x2="205" y2="181" stroke="#58a6ff" stroke-width="2" marker-end="url(#a4)"/>
+
+  <rect x="210" y="155" width="160" height="52" rx="8" fill="#1c2333" stroke="#f778ba" stroke-width="1.5"/>
+  <text x="290" y="177" text-anchor="middle" fill="#f778ba" font-size="9" font-weight="600">ConnectionManager</text>
+  <text x="290" y="193" text-anchor="middle" fill="#8b949e" font-size="8">new CameraManager().startUp(1)</text>
+  <line x1="370" y1="181" x2="415" y2="181" stroke="#f778ba" stroke-width="2" marker-end="url(#a4)"/>
+
+  <rect x="420" y="155" width="160" height="52" rx="8" fill="#1c2333" stroke="#d29922" stroke-width="1.5"/>
+  <text x="500" y="177" text-anchor="middle" fill="#d29922" font-size="9" font-weight="600">CameraManager</text>
+  <text x="500" y="193" text-anchor="middle" fill="#8b949e" font-size="8">Camera.open() → takePicture()</text>
+  <line x1="580" y1="181" x2="625" y2="181" stroke="#d29922" stroke-width="2" marker-end="url(#a4)"/>
+
+  <rect x="630" y="155" width="160" height="52" rx="8" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="710" y="177" text-anchor="middle" fill="#3fb950" font-size="9" font-weight="600">JPEG Buffer</text>
+  <text x="710" y="193" text-anchor="middle" fill="#8b949e" font-size="8">bitmap.compress(JPEG, 20)</text>
+  <line x1="790" y1="181" x2="835" y2="181" stroke="#3fb950" stroke-width="2" marker-end="url(#a4g)"/>
+
+  <rect x="840" y="155" width="140" height="52" rx="8" fill="#1c2333" stroke="#bc8cff" stroke-width="1.5"/>
+  <text x="910" y="177" text-anchor="middle" fill="#bc8cff" font-size="9" font-weight="600">Socket Emit</text>
+  <text x="910" y="193" text-anchor="middle" fill="#8b949e" font-size="8">"x0000ca" → Server</text>
+
+  <!-- common response pattern -->
+  <rect x="20" y="240" width="960" height="85" rx="10" fill="#1c2333" stroke="#30363d" stroke-width="1.5"/>
+  <text x="500" y="264" text-anchor="middle" fill="#e6edf3" font-size="12" font-weight="600">Common Exfiltration Pattern</text>
+  <text x="40" y="286" fill="#8b949e" font-size="10">1. Attacker sends JSON <tspan fill="#58a6ff">{"order":"x0000XX", "extra":"..."}</tspan> over Socket.IO</text>
+  <text x="40" y="302" fill="#8b949e" font-size="10">2. ConnectionManager dispatches to the appropriate <tspan fill="#f778ba">Manager class</tspan></text>
+  <text x="40" y="318" fill="#8b949e" font-size="10">3. Manager accesses Android API / ContentProvider → builds <tspan fill="#3fb950">JSON result</tspan> → emits on same event name</text>
+</svg>
+</div>
+</section>
+
+<!-- 7. SECURITY IMPLICATIONS -->
+<section>
+<h2><span class="num">7</span> Security Analysis &amp; Defensive Indicators</h2>
+
+<div class="grid-2">
+<div class="card" style="border-color:rgba(248,81,73,0.4)">
+<div class="card-title" style="color:var(--red)">🔴 What Makes This Dangerous</div>
+<ul style="font-size:0.85rem;color:var(--text-dim);padding-left:1.2rem;list-style:none">
+<li style="margin-bottom:0.4rem">🧩 <strong>16+ dangerous permissions</strong> — grants nearly complete device access</li>
+<li style="margin-bottom:0.4rem">🎭 <strong>Masquerades as "Google Play Service"</strong> — blends into legitimate system apps</li>
+<li style="margin-bottom:0.4rem">👻 <strong>Hides launcher icon</strong> — victims can't find it to uninstall</li>
+<li style="margin-bottom:0.4rem">💀 <strong>Device Admin privilege</strong> — prevents removal, enables lock/wipe/reboot</li>
+<li style="margin-bottom:0.4rem">🔄 <strong>Multiple persistence layers</strong> — survives reboot, kill, task removal</li>
+<li style="margin-bottom:0.4rem">📡 <strong>Real-time C2 via WebSocket</strong> — low latency, evades standard monitoring</li>
+<li style="margin-bottom:0.4rem">📁 <strong>File system access</strong> — can browse, download, or delete any file</li>
+</ul>
+</div>
+
+<div class="card" style="border-color:rgba(63,185,80,0.4)">
+<div class="card-title" style="color:var(--green)">🟢 Defensive Indicators</div>
+<ul style="font-size:0.85rem;color:var(--text-dim);padding-left:1.2rem;list-style:none">
+<li style="margin-bottom:0.4rem">🔍 Check <strong>Settings → Apps</strong> for "Google Play Service" — delete it</li>
+<li style="margin-bottom:0.4rem">📋 Review <strong>Device Admin apps</strong> — deactivate unknown admins</li>
+<li style="margin-bottom:0.4rem">🔋 Check <strong>Battery Optimization exceptions</strong> for unknown apps</li>
+<li style="margin-bottom:0.4rem">🔔 Check <strong>Notification Access</strong> for suspicious listeners</li>
+<li style="margin-bottom:0.4rem">📲 Monitor for unexpected <strong>data usage spikes</strong> (WebSocket traffic)</li>
+<li style="margin-bottom:0.4rem">🔎 Look for <strong>overlay permission</strong> granted to unknown apps</li>
+<li style="margin-bottom:0.4rem">🧪 Use EDR / mobile security suite to detect suspicious permission constellations</li>
+</ul>
+</div>
+</div>
+</section>
+
+<!-- 8. BUILD & DEPLOYMENT -->
+<section>
+<h2><span class="num">8</span> Build Configuration &amp; Setup</h2>
+
+<div class="grid-2">
+<div class="card">
+<div class="card-title" style="color:var(--accent)">📦 Build Details</div>
+<table class="tbl">
+<tr><th>Property</th><th>Value</th></tr>
+<tr><td>Package ID</td><td><code>com.android.background.services</code></td></tr>
+<tr><td>App Name</td><td>Google Play Service</td></tr>
+<tr><td>minSdk / targetSdk</td><td><code>21</code> (Lollipop) / <code>34</code></td></tr>
+<tr><td>Version</td><td><code>2.1</code></td></tr>
+<tr><td>Server URL</td><td><code>http://192.168.65.113:42474</code></td></tr>
+<tr><td>Compression</td><td>ProGuard (minifyEnabled)</td></tr>
+<tr><td>Libraries</td><td>Socket.IO 2.0.1, commons-io 2.11, WorkManager 2.9</td></tr>
+</table>
+</div>
+
+<div class="card">
+<div class="card-title" style="color:var(--accent)">🧩 AndroidManifest Highlights</div>
+<table class="tbl">
+<tr><th>Feature</th><th>Declaration</th></tr>
+<tr><td>Foreground Service</td><td><code>camera | microphone | location | mediaProjection</code></td></tr>
+<tr><td>Receiver Actions</td><td><code>BOOT_COMPLETED, SMS_RECEIVED, NEW_OUTGOING_CALL</code></td></tr>
+<tr><td>Notification Listener</td><td><code>BIND_NOTIFICATION_LISTENER_SERVICE</code></td></tr>
+<tr><td>Cleartext Traffic</td><td><code>android:usesCleartextTraffic="true"</code></td></tr>
+<tr><td>Library</td><td>AndroidX, Material, ConstraintLayout</td></tr>
+<tr><td>Hardware Features</td><td>Camera, AutoFocus, GPS — all required</td></tr>
+</table>
+</div>
+</div>
+</section>
+
+<!-- 9. FULL COMMAND REFERENCE -->
+<section>
+<h2><span class="num">9</span> Complete Command Reference</h2>
+<div style="overflow-x:auto">
+<table class="tbl">
+<thead>
+<tr><th>Opcode</th><th>Function</th><th>Extra</th><th>Manager</th><th>Capability</th></tr>
+</thead>
+<tbody>
+<tr><td><code>x0000ca</code></td><td>Camera</td><td><code>camList</code>, <code>0</code>, <code>1</code></td><td>CameraManager</td><td>List cameras, capture from front (0) or back (1)</td></tr>
+<tr><td><code>x0000fm</code></td><td>File Manager</td><td><code>ls</code>/<code>dl</code> + <code>path</code></td><td>FileManager</td><td>List directory contents, download file</td></tr>
+<tr><td><code>x0000sm</code></td><td>SMS</td><td><code>ls</code> or <code>sendSMS</code>+<code>to</code>+<code>sms</code></td><td>SMSManager</td><td>Read all SMS inbox, send SMS</td></tr>
+<tr><td><code>x0000cl</code></td><td>Call Logs</td><td>—</td><td>CallsManager</td><td>Read call history (number, name, duration, type)</td></tr>
+<tr><td><code>x0000cn</code></td><td>Contacts</td><td>—</td><td>ContactsManager</td><td>Exfiltrate all saved contacts</td></tr>
+<tr><td><code>x0000mc</code></td><td>Microphone</td><td><code>sec</code> (duration)</td><td>MicManager</td><td>Record audio for N seconds, send MPEG-4 AAC</td></tr>
+<tr><td><code>x0000apps</code></td><td>App List</td><td>—</td><td>AppsListManager</td><td>List all installed packages</td></tr>
+<tr><td><code>x0000lm</code></td><td>Location</td><td>—</td><td>LocManager</td><td>GPS latitude/longitude coordinates</td></tr>
+<tr><td><code>x0000sc</code></td><td>Screen Capture</td><td>—</td><td>ScreenManager</td><td>Capture screen via MediaProjection → Base64</td></tr>
+<tr><td><code>x0000runApp</code></td><td>Launch App</td><td><code>extra</code> (package)</td><td>ConnectionManager</td><td>Open any installed app by package name</td></tr>
+<tr><td><code>x0000openUrl</code></td><td>Open URL</td><td><code>url</code></td><td>ConnectionManager</td><td>Open URL in device browser</td></tr>
+<tr><td><code>x0000deleteFF</code></td><td>Delete</td><td><code>fileFolderPath</code></td><td>ConnectionManager</td><td>Delete file or folder (recursive)</td></tr>
+<tr><td><code>x0000dm</code></td><td>Dial Number</td><td><code>number</code></td><td>ConnectionManager</td><td>Initiate phone call to number</td></tr>
+<tr><td><code>x0000lockDevice</code></td><td>Lock</td><td>—</td><td>ConnectionManager</td><td>Lock screen instantly</td></tr>
+<tr><td><code>x0000wipeDevice</code></td><td>Wipe</td><td>—</td><td>ConnectionManager</td><td>Factory reset (Device Admin)</td></tr>
+<tr><td><code>x0000rebootDevice</code></td><td>Reboot</td><td>—</td><td>ConnectionManager</td><td>Reboot device (Android 7.0+)</td></tr>
+<tr><td><code>x0000nt</code></td><td>Notification</td><td>auto</td><td>NotificationService</td><td>Exfiltrate all incoming notifications</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="callout">
+<strong>Protocol pattern:</strong> Every opcode begins with <code>x0000</code> prefix. Responses use the <strong>same</strong> event name. Manager classes do not verify the source — any server with the correct URL can issue any command.
+</div>
+</section>
+
+</div>
+
+<footer>
+Built with 🛡 for educational analysis. Freebuff / Buffy — Visual Architecture Explorer.
+</footer>
+
+<script>
+// Simple intersection observer for fade-in effect on cards
+if (window.IntersectionObserver) {
+  document.querySelectorAll('.card, .svg-wrap').forEach(el => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(12px)';
+    el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.style.opacity = '1';
+          entry.target.style.transform = 'translateY(0)';
+          obs.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.08 });
+    obs.observe(el);
+  });
+}
+</script>
+
+</body>
+</html>
