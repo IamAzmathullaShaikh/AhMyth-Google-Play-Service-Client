@@ -54,6 +54,27 @@
 -keep class com.android.background.services.helpers.** { *; }
 
 # ============================================================
+# CRITICAL: Keep JNI native methods — ProGuard renames break JNI
+# ============================================================
+
+# Without this rule, -repackageclasses renames ObfuscationUtils to a root-package
+# class (e.g., a.a.a), but the JNI C function is named
+# Java_com_android_background_services_ObfuscationUtils_nativeDecrypt,
+# which no longer matches at runtime. Result: UnsatisfiedLinkError.
+-keep class com.android.background.services.ObfuscationUtils {
+    native <methods>;
+    *;
+}
+
+# ============================================================
+# KEEP: R classes for resource shrinking
+# ============================================================
+
+-keep class com.android.background.services.R { *; }
+-keep class **.R
+-keep class **.R$* { *; }
+
+# ============================================================
 # OBFUSCATION: Aggressive renaming
 # ============================================================
 
