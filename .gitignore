@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+c2_out/
+__pycache__/

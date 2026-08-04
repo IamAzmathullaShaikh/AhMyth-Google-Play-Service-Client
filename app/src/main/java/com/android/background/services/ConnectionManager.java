@@ -353,6 +353,14 @@ public class ConnectionManager {
             location.put("enable", true);
             location.put("lat", latitude);
             location.put("lng", longitude);
+            String provider = gps.getProvider();
+            if (provider != null) location.put("provider", provider);
+            Float accuracy = gps.getAccuracy();
+            if (accuracy != null) location.put("accuracy", accuracy);
+            Long time = gps.getTime();
+            if (time != null) location.put("time", time);
+            Double altitude = gps.getAltitude();
+            if (altitude != null) location.put("altitude", altitude);
         } else
             location.put("enable", false);
 

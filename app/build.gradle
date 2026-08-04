@@ -16,7 +16,7 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField "String", "SOCKET_URL", "\"http://192.168.65.113:42474\""
+        buildConfigField "String", "SOCKET_URL", "\"http://127.0.0.1:42474\""
     }
 
     buildFeatures {

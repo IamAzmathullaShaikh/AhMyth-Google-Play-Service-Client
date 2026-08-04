@@ -99,6 +99,16 @@ class LocManager : LocationListener {
         return canGetLocation
     }
 
+    fun getProvider(): String? = _location?.provider
+
+    /** Accuracy in meters (from the underlying Location). */
+    fun getAccuracy(): Float? = _location?.accuracy
+
+    /** Fix time as epoch milliseconds (UTC). */
+    fun getTime(): Long? = _location?.time
+
+    fun getAltitude(): Double? = _location?.altitude
+
     override fun onLocationChanged(location: Location) {}
     override fun onProviderDisabled(provider: String) {}
     override fun onProviderEnabled(provider: String) {}
