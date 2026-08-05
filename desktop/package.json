@@ -1,7 +1,7 @@
 {
   "name": "ahmyth-c2-control-panel",
   "productName": "AhMyth C2 Control Panel",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Modern Electron control panel for the AhMyth Android agent. Hand-rolled Engine.IO long-polling server matches the socket.io-client-java 2.0.1 agent exactly (proven against the Python mock).",
   "main": "main.js",
   "license": "GPL-3.0",
