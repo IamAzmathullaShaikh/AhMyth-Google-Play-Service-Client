@@ -2,7 +2,13 @@
 
 Short guide for cutting and distributing a release of the desktop C2 control
 panel (`desktop/`). Version is read from `desktop/package.json` (currently
-**2.1.3**). Per-version changes are in [`CHANGELOG.md`](../CHANGELOG.md).
+**2.1.5**). Per-version changes are in [`CHANGELOG.md`](../CHANGELOG.md).
+
+Since 2.1.5 the panel also includes a **payload builder**: the Payload
+Builder card (or `POST /api/build`) bakes a server URL + device id into a
+fresh Android APK (`payloads/payload_<device>_<stamp>.apk` + `.sha256`) with
+the first-run auto-grant wizard baked in — the target only needs to sideload
+and run the APK, no adb, no PC-side scripts.
 
 ## Artifacts
 
@@ -116,8 +122,8 @@ rebuilds stay unsigned (the pfx path, which is free, also signs on dispatch).
 **AppImage (any distro, portable):**
 
 ```bash
-chmod +x "AhMyth C2 Control Panel-2.1.0.AppImage"
-./"AhMyth C2 Control Panel-2.1.0.AppImage"
+chmod +x "AhMyth C2 Control Panel-2.1.5.AppImage"
+./"AhMyth C2 Control Panel-2.1.5.AppImage"
 ```
 
 - Older distros may need FUSE 2: `sudo apt install libfuse2` (Ubuntu 22.04+).
@@ -127,7 +133,7 @@ chmod +x "AhMyth C2 Control Panel-2.1.0.AppImage"
 **deb (Debian / Ubuntu / Mint):**
 
 ```bash
-sudo apt install ./ahmyth-c2-control-panel_2.1.0_amd64.deb
+sudo apt install ./ahmyth-c2-control-panel_2.1.5_amd64.deb
 ahmyth-c2-control-panel          # launch from the menu or terminal
 
 # uninstall
@@ -137,7 +143,7 @@ sudo apt remove ahmyth-c2-control-panel
 **Windows (portable, no install):**
 
 ```text
-download "AhMyth C2 Control Panel-2.1.0.exe" → double-click to run
+download "AhMyth C2 Control Panel-2.1.5.exe" → double-click to run
 ```
 
 The portable exe runs in place — no installer, no admin rights needed. It

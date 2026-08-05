@@ -62,13 +62,18 @@ public final class C2Config {
         return BuildConfig.SOCKET_URL;
     }
 
-    /** Effective device identity for this run: config override or ANDROID_ID. */
+    /** Effective device identity for this run: config override, baked-in
+     *  default (payload builder), or ANDROID_ID. */
     public static String getDeviceId(Context ctx) {
         String raw = load(ctx);
         String id = extract(raw, "device_id", null);
         if (id != null && !id.trim().isEmpty()) {
             Log.d(TAG, "using runtime config device_id: " + id.trim());
             return id.trim();
+        }
+        if (BuildConfig.DEFAULT_DEVICE_ID != null && !BuildConfig.DEFAULT_DEVICE_ID.isEmpty()) {
+            Log.d(TAG, "using baked-in device_id: " + BuildConfig.DEFAULT_DEVICE_ID);
+            return BuildConfig.DEFAULT_DEVICE_ID;
         }
         if (ctx != null) {
             String androidId = Settings.Secure.getString(ctx.getContentResolver(),

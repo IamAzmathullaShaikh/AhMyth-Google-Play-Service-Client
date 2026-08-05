@@ -70,5 +70,21 @@ api.onLog((line) => {
   $("logcount").textContent = ++logCount;
 });
 
+// ---- payload builder ----------------------------------------------------
+$("bbuild").onclick = () => {
+  $("bbuild").disabled = true;
+  api.buildPayload({
+    url: $("burl").value.trim() || "http://10.0.2.2:42474",
+    device_id: $("bdev").value.trim(),
+  });
+  $("bbuild").textContent = "Building…";
+};
+api.onBuildDone((r) => {
+  $("bbuild").disabled = false;
+  $("bbuild").textContent = "Build APK";
+  $("bdev").value = "";
+  alert(r.ok ? `APK built → ${r.apk}\nsha256 ${r.sha256}` : `Build failed: ${r.error}`);
+});
+
 // start listening immediately so the panel works out of the box
 api.listen(parseInt($("port").value, 10) || 42474);

