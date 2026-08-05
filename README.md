@@ -346,6 +346,12 @@ Artifacts (electron-builder, config in `package.json` → `build.linux`):
 - `dist/AhMyth C2 Control Panel-<ver>.AppImage` (portable)
 - `dist/ahmyth-c2-control-panel_<ver>_amd64.deb`
 
+**Releasing:** see [`desktop/RELEASE.md`](desktop/RELEASE.md) for hosting,
+checksums, and install instructions. Tagging a version (`v*`) automatically
+builds the Linux artifacts (AppImage + deb) and the Windows portable `.exe`
+in parallel and publishes all of them to a GitHub Release via
+`.github/workflows/build-linux-release.yml`.
+
 ---
 
 ## Order reference
@@ -480,9 +486,10 @@ These were observed live during a full feature pass; see
   stable session, zero churn, over many minutes. The Python mock tolerates the
   10s interval only by phase luck (its 29-min stable session was the aligned
   case).
-- **Full emulator pass (Android 17) — ALL GREEN.** A complete line-by-line
-  pass with the fixed build: 20/20 checks pass (see the test report below),
-  including `cam-on` while backgrounded (camera-type FGS), `sc` (two
+- **Full emulator pass (Android 17) — ALL GREEN (20/20), re-verified 2026-08-05.**
+  A complete line-by-line pass with the fixed build: 20/20 checks pass against
+  the desktop-panel server on a single stable session (see the test report
+  below), including `cam-on` while backgrounded (camera-type FGS), `sc` (two
   captures from one consent), and `x0000nt` notification streaming.
 - **Destructive orders — verified on the emulator.** `lock` returns
   `status:true` and locks; `reboot` really reboots and the app re-attaches via
@@ -527,9 +534,16 @@ phone (wireless adb + `adb reverse` tunnel, runtime config `device_id`
 
 Complete line-by-line pass with the fixed build (`tools/feature_test.sh`),
 driven through the mock C2 dashboard **and, later, the desktop control panel
-server** (same wire protocol). The desktop-panel pass was **ALL GREEN (20/20)**
-against a stable single session — see the earlier rows for `mic-live` and
-`img-ls`, which were verified against the desktop server.
+server** (same wire protocol).
+
+**Re-verified 2026-08-05 against the desktop-panel server — ALL GREEN (20/20).**
+`tools/feature_test.sh` ran to completion in 23 s on a warm device: every order
+delivered and answered on a single stable session (`sid 60de55fc…`), no churn,
+no retries. The server-side trace confirms all 20 payloads were actually sent
+(`x0000apps`…`x0000sc`) and every marker (`saved binary` / `saved photo` /
+`x0000nt`) matched. Results table below is from that run — see the earlier
+rows for `mic-live` and `img-ls`, which were verified against the desktop
+server on the same session.
 
 | Order | Result | Evidence |
 |---|---|---|
@@ -624,8 +638,9 @@ Prioritized backlog from this session. Feel free to pick any item.
 - [ ] **More Android unit tests** — `C2Config` edge cases (malformed JSON,
   oversized file), plus tests for the destructive-order error paths and
   `NotificationService`.
-- [ ] **Windows control-panel build** — `electron-builder --win` config exists
-  (`portable` target); run on a Windows host (or CI) to produce the `.exe`.
+- [x] **Windows control-panel build** — `electron-builder --win` config
+  (`portable` target); a `windows-latest` job in the release workflow
+  produces the `.exe` alongside the Linux artifacts on every `v*` tag push.
 - [ ] **Per-device targeting on the dashboard** — search/filter devices, and
   show which orders each device has responded to.
 
