@@ -24,6 +24,8 @@ communication with a command-and-control (C2) server and implements a modular
 - [Order reference](#order-reference)
 - [Response capture & downloads](#response-capture--downloads)
 - [Known limitations](#known-limitations)
+- [Test report — vivo V2538 (Android 16)](#test-report--vivo-v2538-android-16)
+- [Roadmap & TODO](#roadmap--todo)
 - [Removing the app from a device](#removing-the-app-from-a-device)
 - [Development & tests](#development--tests)
 
@@ -299,6 +301,96 @@ the dashboard's **Downloads** panel or `GET /files/<device>/<name>`.
 - **Notifications.** `NotificationService` streams device notifications to the
   C2 continuously, with no order needed. On anyone else's phone this is silent
   surveillance; disable/remove the listener when you're done testing.
+
+### Verified on a physical device (vivo V2538, Android 16) — session findings
+
+These were observed live during a full feature pass; see
+[Test report](#test-report--vivo-v2538-android-16) for the complete matrix.
+
+- **`cam-on` silent photo does not work on Android 16.** `CameraManager` uses
+  the deprecated `android.hardware.Camera` API, which is dead on modern
+  Android (returns `null` / throws). The handler swallows the exception, so the
+  order goes out and **no response ever comes back** — a silent failure, not a
+  crash. Needs a `Camera2` rewrite (see [Roadmap](#roadmap--todo)).
+- **`sc` screen capture silently no-ops.** The app only requests
+  MediaProjection consent when the user grants runtime permissions *through
+  its in-app flow*. When permissions are pre-granted via `adb shell pm grant`
+  (as the docs recommend), that code path never runs, no projection token is
+  ever captured, and `x0000sc` returns nothing. On Android 14+ there is also an
+  architectural conflict to verify: capture requires a `mediaProjection`
+  foreground-service type, which the `specialUse` fix here removed.
+- **Initial socket churn on reconnect.** The phone's socket session id churned
+  every ~40–60 s for the first minutes after launch before settling; the app
+  process itself stayed stable (verified via `pidof`). Worth investigating, not
+  blocking.
+- **Harness gap — binary responses are not saved.** `mc` (mic) and `fm-dl`
+  (file download) arrive as Socket.IO binary events; the mock C2 logs them but
+  **does not write the bytes to disk** like it does for JSON responses. Audio
+  and file downloads are received but not capturable from the dashboard yet
+  (see [Roadmap](#roadmap--todo)).
+- **Untested by design.** The destructive orders (`lock`, `wipe`, `reboot`,
+  `delete`, `sms-send`, `call`) were deliberately never fired during testing.
+
+---
+
+## Test report — vivo V2538 (Android 16)
+
+Full feature pass driven through the mock C2 dashboard against a physical
+phone (wireless adb + `adb reverse` tunnel, runtime config `device_id`
+`vivo-test-01`). Recorded live.
+
+| Order | Result | Evidence |
+|---|---|---|
+| `apps` | ✅ works | ~65 KB list; saved `.json` + readable `.txt` |
+| `cn` (contacts) | ✅ works | ~188 KB; real names/numbers |
+| `cl` (call log) | ✅ works | ~960 KB; real entries |
+| `sms` (inbox) | ✅ works | ~546 KB; real messages |
+| `ca` (camera list) | ✅ works | Back (id 0), Front (id 1) |
+| `lm` (location) | ✅ works | **rich fix**: provider `network`, accuracy 15.1 m, altitude 471 m, epoch time |
+| `fm-ls` | ✅ works | real directory listing incl. user files |
+| `fm-dl` (download) | ⚠️ received | bytes arrive as a binary event; harness doesn't save them yet |
+| `mc 5` (mic) | ⚠️ received | ~5 s recording arrives as a binary event; not saved yet |
+| `cam-on` (photo) | ❌ fails | no response — deprecated `android.hardware.Camera` dead on Android 16 |
+| `sc` (screen) | ❌ no-op | projection consent never granted; see Known limitations |
+| `run-app com.android.settings` | ✅ works | `launchingStatus:true`; Settings opened on the phone |
+| `open-url` | ✅ works | `status:true`; browser opened on the phone |
+| notifications (`x0000nt`) | ✅ works | streams automatically; verified with an `adb`-posted test notification |
+| heartbeat | ✅ works | `ping` → `pong` every ~10 s |
+| runtime config override | ✅ works | phone registered as `vivo-test-01` (no rebuild) |
+
+**Not tested** (destructive, skipped by choice): `lock`, `wipe`, `reboot`,
+`delete`, `sms-send`, `call`.
+
+---
+
+## Roadmap & TODO
+
+Prioritized backlog from this session. Feel free to pick any item.
+
+- [ ] **Migrate `CameraManager` to Camera2** — replace the dead
+  `android.hardware.Camera` API so `cam-on` works on Android 12+. Emit a proper
+  binary/`base64` photo payload and make the mock C2 save it to disk.
+- [ ] **Fix the `sc` screen-capture flow** — capture the MediaProjection token
+  unconditionally at launch (not only via the in-app permission path), and
+  resolve the Android 14+ `mediaProjection` FGS-type conflict with the
+  `specialUse` manifest fix.
+- [ ] **Harness: persist binary events** — save mic audio and downloaded files
+  (bytes) under `c2_out/<device>/` and list them in the dashboard Downloads
+  panel, like JSON responses already are.
+- [ ] **Investigate reconnect churn** — pin down the initial ~40–60 s socket
+  session-id churn on the phone and tune
+  `reconnectionDelay*` so a transient network blip retries instead of waiting
+  ~11.5 days.
+- [ ] **Test `sc` end-to-end on a physical device** — relaunch the app without
+  pre-granted permissions, tap through the in-app permission + screen-capture
+  dialogs, then confirm a screenshot is captured.
+- [ ] **Exercise destructive orders on hardware you own** — `lock`, `reboot`,
+  `delete`, `sms-send`, `call` (skip `wipe` unless you truly want a factory
+  reset) and record results in the test report.
+- [ ] **More unit tests** — `C2Config` edge cases (malformed JSON, oversized
+  file), plus tests for any new Camera2 / binary-capture code.
+- [ ] **Per-device targeting on the dashboard** — search/filter devices, and
+  show which orders each device has responded to.
 
 ---
 
