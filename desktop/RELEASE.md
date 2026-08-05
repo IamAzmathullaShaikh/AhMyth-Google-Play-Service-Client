@@ -2,7 +2,7 @@
 
 Short guide for cutting and distributing a release of the desktop C2 control
 panel (`desktop/`). Version is read from `desktop/package.json` (currently
-**2.1.0**).
+**2.1.3**). Per-version changes are in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Artifacts
 

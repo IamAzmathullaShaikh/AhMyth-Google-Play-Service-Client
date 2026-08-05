@@ -11,6 +11,8 @@
 #   ./tools/feature_test.sh --wipe     # also factory-reset (VERY last)
 #
 # Requires: mock C2 running (tools/run_mock_c2.sh), one device connected.
+# Against the desktop control panel, point LOG at its server log, e.g.:
+#   LOG=/tmp/panel_server.log ./tools/feature_test.sh
 # =============================================================================
 set -u
 

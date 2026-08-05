@@ -224,6 +224,16 @@ pass/fail matrix (20 checks). Destructive orders are opt-in:
 ./tools/feature_test.sh --wipe         # also factory-reset (VERY last)
 ```
 
+Against the **desktop control panel** server (same wire protocol), point `LOG`
+at the panel's server log so the marker greps match:
+
+```bash
+LOG=/tmp/panel_server.log ./tools/feature_test.sh
+```
+
+(The default `LOG` is the Python mock's `/tmp/mock_c2.log`; the panel logs to
+its own file — see `desktop/RELEASE.md`.)
+
 ---
 
 ## Testing on a physical device (wireless adb)
@@ -544,6 +554,16 @@ no retries. The server-side trace confirms all 20 payloads were actually sent
 `x0000nt`) matched. Results table below is from that run — see the earlier
 rows for `mic-live` and `img-ls`, which were verified against the desktop
 server on the same session.
+
+**Re-verified again 2026-08-05 after the mic fixes — ALL GREEN (20/20)**
+on a fresh single session (0 disconnects). The `mic-live` toggle was
+exercised end-to-end: start → stop saves **one** complete WAV and no phantom
+empty stream files. Two bugs were found and fixed (see CHANGELOG.md [2.1.4]):
+a trailing `audioData` chunk after `audioDataStop` recreated a stray 44-byte
+WAV (server now arms the stream only when a `x0000listenMic` order is sent),
+and `fs.writeSync(fh, data, 44)` dropped the first 44 PCM bytes of every
+live-mic WAV (offset was a buffer offset, not a file position). Both are
+covered by the new mic-stream regression test in `desktop/test/server.test.js`.
 
 | Order | Result | Evidence |
 |---|---|---|
