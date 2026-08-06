@@ -629,15 +629,21 @@ stable session — see the new rows below. The desktop **payload builder**
 (`POST /api/build`) produced a sha256-checked APK with a baked-in URL/device
 id. Full feature-test re-run pending; new rows verified live.
 
-**Re-verified again 2026-08-05 after the mic fixes — ALL GREEN (20/20)**
-on a fresh single session (0 disconnects). The `mic-live` toggle was
-exercised end-to-end: start → stop saves **one** complete WAV and no phantom
-empty stream files. Two bugs were found and fixed (see CHANGELOG.md [2.1.4]):
-a trailing `audioData` chunk after `audioDataStop` recreated a stray 44-byte
-WAV (server now arms the stream only when a `x0000listenMic` order is sent),
-and `fs.writeSync(fh, data, 44)` dropped the first 44 PCM bytes of every
-live-mic WAV (offset was a buffer offset, not a file position). Both are
-covered by the new mic-stream regression test in `desktop/test/server.test.js`.
+**Re-verified 2026-08-06 after the auto-grant reliability fixes — ALL GREEN (20/20)**
+on a fresh emulator session (Android 17, `emu-fulltest`), plus the six data
+orders verified live with real payloads. Two auto-grant bugs were found and
+fixed this round: `AutoGrantService` now walks up the node ancestor chain,
+matches button `content-desc`/view-ids, requests `flagRetrieveInteractiveWindows`
+and reacts to `typeWindowContentChanged` (Android 17 pruned the admin
+Activate button from its tree otherwise) and `MainActivity` gained a
+delayed advance + lifecycle guard so an auto-tapped dialog inside the
+launch-transition window no longer stalls the wizard (see CHANGELOG.md).
+**Live evidence this round:** AutoGrant auto-tapped the notification-listener
+“Allow” consent and the battery “Allow” dialog; the wizard walked all 8
+stages in one pass (storage + overlay granted via uid-mode appops on the
+emulator’s glitchy toggles); screen-capture consent granted → **real
+1080×2400 JPEG saved**; `20/20` suite green including `photo back/front` and
+`screen capture ×2`.
 
 | Order | Result | Evidence |
 |---|---|---|

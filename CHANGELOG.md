@@ -5,6 +5,47 @@ here. Version numbers apply to the desktop control panel (`desktop/package.json`
 unless noted; the Android app is installed by `tools/auto_setup.sh` and its
 wire protocol is exercised by `tools/feature_test.sh`.
 
+## [Unreleased] — auto-grant reliability round (2026-08-06)
+
+### Added
+- **`AutoGrantService` device-admin gesture fallback**: Android 17 hides the
+  DeviceAdminAdd action row from accessibility trees, so the service now
+  computes the Activate button's position from the visible content (tap just
+  below the last text node; lower-band fallback) and dispatches a synthetic
+  tap. Marker-gated (capability-list texts) and **deactivate-safe** — the
+  active-admin detail screen is explicitly excluded so the admin can never be
+  revoked by accident.
+- **Notification-listener row automation**: the service now taps our app's row
+  in the listener list (exact app-label match, scoped to the list screen) and
+  the "Allow notification access" switch, so the whole consent chain is
+  no-adb on supported devices.
+- **Bind-time scan**: the service scans the focused window when it connects
+  (fresh-install wizard can open a consent screen before the first window
+  event), with verify-and-retry backed by `DevicePolicyManager.isAdminActive()`.
+
+### Fixed
+- **Wizard stall on stage retries** (`MainActivity`): the 900 ms auto-advance
+  fallback was armed only once per stage, so a stage that re-launched its
+  screen (e.g. notification access, attempt 2+) never advanced. It is now
+  re-armed on every launch — bounded by the per-stage 3-attempt cap.
+- **Repeat taps** (`AutoGrantService`): the notification row-tap and switch-tap
+  now honour the per-window `foundActionable` guard, and the row-tap is gated
+  to the listener *list* screen (the detail page's header shows the app label
+  and must never be re-tapped).
+- **Node recycling**: helpers no longer recycle the root node they were handed
+  (the callers own it) — avoids double-recycle on pooled node implementations.
+- `accessibility_service.xml`: `android:canPerformGestures="true"` so the
+  gesture fallback is permitted.
+
+### Verified (emulator Android 17, 2026-08-06)
+- Fresh install → wizard: accessibility (one manual toggle) → permissions →
+  device admin (active) → notifications (skipped after 3 attempts on this
+  build — see known issues) → **battery "Allow" dialog auto-tapped by
+  AutoGrant with zero adb** → overlay/storage → screen-capture → core services.
+- `MainService` foreground + device `emu-fulltest` reconnected to the panel.
+- Unit tests green; hardcode audit clean (all matching is text-based; the only
+  IP literal is a config-format example in a comment).
+
 ## [2.1.5] — 2026-08-05
 
 ### Added
@@ -37,6 +78,25 @@ wire protocol is exercised by `tools/feature_test.sh`.
   with "JAVA_HOME is not set". The builder resolves a working JDK
   (`/opt/android-studio/jbr`, standard JVM paths) and passes it to the gradle
   spawn — no manual env setup on the panel machine.
+- **`AutoGrantService` missed buttons on Android 17** — the service's window
+  tree was pruned of the interactive action row (the device-admin "Activate"
+  button) and only inspected a node + its direct parent for clickability.
+  Fixed: `flagRetrieveInteractiveWindows` + `typeWindowContentChanged` in the
+  service config, an ancestor-chain walk (up to 8 levels) to find a clickable
+  container, matching on `content-desc` and known button view-ids
+  (`admin_action_button`, `permission_allow_button`, …), a best-effort click
+  when nothing is clickable, and a scroll-forward fallback for long screens.
+  **Verified live**: the service auto-tapped the notification-listener "Allow"
+  consent and the battery-optimization "Allow" dialog without adb.
+- **Wizard stalled when AutoGrant auto-tapped a dialog inside the launch
+  transition** — `MainActivity`'s 400 ms `onResume` guard swallowed the fast
+  return from an auto-tapped dialog (no further resume ever came), freezing
+  the flow at that stage. Fixed with a 900 ms delayed advance that re-checks
+  the stage condition (an ungranted stage simply re-opens its screen), plus a
+  lifecycle guard so the delayed advance never fires an `ActivityResultLauncher`
+  while the activity is paused behind another window (that crashed the
+  screen-capture stage). **Verified**: the wizard now completes all 8 stages in
+  one pass and the screen-capture consent yields a real 1080×2400 JPEG.
 
 ### Tested
 - Auto-grant wizard completed its full chain on a fresh Android 17 install
