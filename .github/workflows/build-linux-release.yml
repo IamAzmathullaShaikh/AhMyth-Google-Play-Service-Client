@@ -1,0 +1,176 @@
+name: Build releases (Linux + Windows)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  id-token: write   # for Azure Trusted Signing (OIDC) when configured
+
+jobs:
+  build-linux:
+    name: Build Linux (AppImage + deb)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('desktop/package-lock.json') }}
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Run protocol unit test
+        working-directory: desktop
+        run: npm test
+
+      - name: Build AppImage + deb
+        working-directory: desktop
+        run: npm run build:linux
+
+      - name: Generate checksums
+        working-directory: desktop/dist
+        run: |
+          sha256sum *.AppImage *.deb > checksums-linux.txt
+          cat checksums-linux.txt
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-release
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/checksums-linux.txt
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (portable .exe)
+    runs-on: windows-latest
+    env:
+      # Signing is opt-in: if none of these secrets are set the exe is built
+      # unsigned (same as today). If BOTH are set, the pfx path wins and the
+      # Azure step is skipped so the exe is never signed twice.
+      HAVE_PFX: ${{ secrets.WIN_CSC_LINK != '' }}
+      HAVE_AZURE_TS: ${{ secrets.AZURE_TS_ACCOUNT != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('desktop/package-lock.json') }}
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Run protocol unit test
+        working-directory: desktop
+        run: npm test
+
+      - name: Prepare signing certificate (pfx)
+        if: env.HAVE_PFX == 'true'
+        shell: bash
+        run: |
+          echo "$WIN_CSC_LINK" | base64 -d > "$RUNNER_TEMP/win-cert.pfx"
+          echo "CSC_LINK=$RUNNER_TEMP/win-cert.pfx" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=$WIN_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Build portable .exe (electron-builder signs when a pfx is set)
+        working-directory: desktop
+        run: npm run build:win
+
+      - name: Azure login (OIDC, for Trusted Signing)
+        if: env.HAVE_AZURE_TS == 'true' && github.ref_type == 'tag'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_TS_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TS_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_TS_SUBSCRIPTION_ID }}
+
+      # Azure Trusted Signing bills per signature, so only sign on tag pushes
+      # (releases), never on manual workflow_dispatch rebuilds.
+      - name: Sign with Azure Trusted Signing
+        if: env.HAVE_AZURE_TS == 'true' && env.HAVE_PFX != 'true' && github.ref_type == 'tag'
+        uses: azure/trusted-signing-action@v0
+        with:
+          endpoint: ${{ vars.AZURE_TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/desktop/dist
+          files-folder-filter: exe
+          file-digest: SHA256
+
+      - name: Generate checksums
+        working-directory: desktop/dist
+        shell: bash
+        run: |
+          sha256sum *.exe > checksums-win.txt
+          cat checksums-win.txt
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-release
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/checksums-win.txt
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-release
+          path: linux-release
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: windows-release
+          path: windows-release
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            linux-release/*
+            windows-release/*
+          generate_release_notes: true

@@ -9,9 +9,15 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+/payloads
+app/build
+desktop/dist
+c2_out
 /captures
 .externalNativeBuild
 .cxx
 local.properties
 c2_out/
 __pycache__/
+.freebuff/
+.agents/

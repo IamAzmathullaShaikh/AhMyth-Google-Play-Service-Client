@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 13px/1.4 system-ui, sans-serif; color: #e6edf3; background: #161b22;
+         border: 1px solid #3fb950; border-radius: 8px; padding: 12px 14px; }
+  .t { color: #3fb950; font-weight: 600; margin-bottom: 4px; }
+  .m { color: #8b949e; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="t">● New device connected</div>
+  <div class="m" id="d">…</div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    document.getElementById("d").textContent =
+      q.get("model") + (q.get("id") ? " · " + q.get("id") : "");
+  </script>
+</body>
+</html>

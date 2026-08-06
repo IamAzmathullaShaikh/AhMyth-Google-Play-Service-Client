@@ -1,0 +1,49 @@
+{
+  "name": "ahmyth-c2-control-panel",
+  "productName": "AhMyth C2 Control Panel",
+  "version": "2.1.5",
+  "description": "Modern Electron control panel for the AhMyth Android agent. Hand-rolled Engine.IO long-polling server matches the socket.io-client-java 2.0.1 agent exactly (proven against the Python mock).",
+  "main": "main.js",
+  "license": "GPL-3.0",
+  "homepage": "https://github.com/IamAzmathullaShaikh/AhMyth-Plus",
+  "author": "IamAzmathullaShaikh",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/server.test.js",
+    "smoke": "node server.js --smoke",
+    "build": "electron-builder --linux",
+    "build:linux": "electron-builder --linux",
+    "build:linux:appimage": "electron-builder --linux AppImage",
+    "build:linux:deb": "electron-builder --linux deb",
+    "build:win": "electron-builder --win"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.android.background.services.c2panel",
+    "productName": "AhMyth C2 Control Panel",
+    "files": [
+      "main.js",
+      "server.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "maintainer": "IamAzmathullaShaikh <iamazmathullashaikh@users.noreply.github.com>",
+      "synopsis": "Remote administration control panel for the AhMyth Android agent"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}

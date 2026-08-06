@@ -25,6 +25,9 @@ public class ContactsManager {
             Cursor cur = MainService.getContextOfApplication().getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                     new String[] { ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER}, null, null,  ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
 
+            if (cur == null) {
+                return null;
+            }
 
             while (cur.moveToNext()) {
                 JSONObject contact = new JSONObject();

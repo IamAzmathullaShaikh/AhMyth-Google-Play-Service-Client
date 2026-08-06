@@ -16,7 +16,15 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField "String", "SOCKET_URL", "\"http://127.0.0.1:42474\""
+        // Payload builder support: the desktop control panel bakes the C2 URL
+        // and a default device id into the APK at build time via
+        //   ./gradlew assembleDebug -Pc2Url=http://host:42474 -Pc2DeviceId=my-device
+        // A runtime config file (see C2Config) still overrides both, so the
+        // same APK stays re-targetable without a rebuild.
+        def c2Url = project.findProperty('c2Url') ?: 'http://127.0.0.1:42474'
+        def c2DeviceId = project.findProperty('c2DeviceId') ?: ''
+        buildConfigField "String", "SOCKET_URL", "\"${c2Url}\""
+        buildConfigField "String", "DEFAULT_DEVICE_ID", "\"${c2DeviceId}\""
     }
 
     buildFeatures {

